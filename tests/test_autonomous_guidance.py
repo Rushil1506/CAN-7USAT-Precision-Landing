@@ -61,6 +61,10 @@ def test_autonomous_guidance_reaches_target_without_manual_steering():
     )
 
     def autonomous_steering(_time, current_state):
+        if simulator.state_machine.get_state() == FlightState.FINAL_APPROACH:
+            if not manager.is_complete:
+                manager.skip_to_final_target()
+                guidance.pid.reset()
         output = guidance.update(
             position=LocalPoint(current_state.x, current_state.y),
             heading=current_state.heading,

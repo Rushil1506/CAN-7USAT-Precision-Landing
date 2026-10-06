@@ -12,6 +12,10 @@ from guidance.loiter_guidance import (
     LoiterGuidanceOutput,
     LoiterPhase,
 )
+from guidance.breakout_guidance import (
+    BreakoutGeometry,
+    calculate_breakout_geometry,
+)
 
 from flight.parafoil import (
     ParafoilState,
@@ -56,6 +60,10 @@ class SimulationSample:
     loiter_radial_error: Optional[float] = None
     loiter_desired_heading: Optional[float] = None
 
+    # Dynamic breakout telemetry (populated when in TERMINAL_GUIDANCE)
+    breakout_required_altitude: Optional[float] = None
+    breakout_altitude_threshold: Optional[float] = None
+
 
 class ParafoilSimulator:
     """
@@ -98,6 +106,7 @@ class ParafoilSimulator:
         loiter_direction: LoiterDirection = LoiterDirection.CLOCKWISE,
         max_terminal_guidance_time: float = 120.0,
         loiter_guidance: Optional[LoiterGuidance] = None,
+        breakout_altitude_margin: float = 2.0,
     ):
 
         # --------------------------------------------------
@@ -133,6 +142,9 @@ class ParafoilSimulator:
 
         if max_terminal_guidance_time <= 0.0:
             raise ValueError("Max terminal guidance time must be greater than zero")
+
+        if breakout_altitude_margin < 0.0:
+            raise ValueError("Breakout altitude margin cannot be negative")
 
         # --------------------------------------------------
         # Store flight model
@@ -199,6 +211,15 @@ class ParafoilSimulator:
         self.cumulative_loiter_angle_deg: float = 0.0
         self._last_loiter_bearing: Optional[float] = None
 
+        # Energy-aligned dynamic breakout parameters (simulation/prototyping values)
+        self.breakout_altitude_margin = breakout_altitude_margin
+        self.last_breakout_geometry: Optional[BreakoutGeometry] = None
+        self.breakout_time: Optional[float] = None
+        self.breakout_altitude: Optional[float] = None
+        self.breakout_distance: Optional[float] = None
+        self.breakout_heading: Optional[float] = None
+        self.loiter_capture_time: Optional[float] = None
+
         # --------------------------------------------------
         # Simulation time
         # --------------------------------------------------
@@ -253,6 +274,21 @@ class ParafoilSimulator:
         ]
         return (sum(errs) / len(errs)) if errs else 0.0
 
+    @property
+    def loiter_tracking_duration(self) -> float:
+        """Total duration spent in steady ORBIT_TRACKING in seconds."""
+        if self.loiter_capture_time is None:
+            return 0.0
+        end_time = self.breakout_time if self.breakout_time is not None else self.time
+        return max(0.0, end_time - self.loiter_capture_time)
+
+    @property
+    def final_approach_duration(self) -> float:
+        """Total duration spent in FINAL_APPROACH in seconds."""
+        if self.final_approach_entry_time is None:
+            return 0.0
+        return max(0.0, self.time - self.final_approach_entry_time)
+
     # ======================================================
     # Record simulation state
     # ======================================================
@@ -266,12 +302,18 @@ class ParafoilSimulator:
         loiter_r_dist = None
         loiter_r_err = None
         loiter_cmd_hdg = None
+        breakout_req_alt = None
+        breakout_thresh = None
 
-        if current_state == FlightState.TERMINAL_GUIDANCE and self.last_loiter_output is not None:
-            loiter_phase = self.last_loiter_output.phase
-            loiter_r_dist = self.last_loiter_output.radial_distance
-            loiter_r_err = self.last_loiter_output.radial_error
-            loiter_cmd_hdg = self.last_loiter_output.desired_heading
+        if current_state == FlightState.TERMINAL_GUIDANCE:
+            if self.last_loiter_output is not None:
+                loiter_phase = self.last_loiter_output.phase
+                loiter_r_dist = self.last_loiter_output.radial_distance
+                loiter_r_err = self.last_loiter_output.radial_error
+                loiter_cmd_hdg = self.last_loiter_output.desired_heading
+            if self.last_breakout_geometry is not None:
+                breakout_req_alt = self.last_breakout_geometry.minimum_required_altitude
+                breakout_thresh = self.last_breakout_geometry.breakout_altitude
 
         self.history.append(
             SimulationSample(
@@ -290,6 +332,8 @@ class ParafoilSimulator:
                 loiter_radial_distance=loiter_r_dist,
                 loiter_radial_error=loiter_r_err,
                 loiter_desired_heading=loiter_cmd_hdg,
+                breakout_required_altitude=breakout_req_alt,
+                breakout_altitude_threshold=breakout_thresh,
             )
         )
 
@@ -411,26 +455,51 @@ class ParafoilSimulator:
                     self.target_position,
                 )
 
-                # FINAL_APPROACH has priority over other terminal logic
-                if (
-                    self.state.altitude <= self.final_approach_altitude
-                    and target_distance <= self.final_approach_radius
-                ):
-                    self.state_machine.transition_to(
-                        FlightState.FINAL_APPROACH
-                    )
-                    self.final_approach_entry_time = self.time
-                    self.final_approach_entry_altitude = self.state.altitude
-                    self.final_approach_entry_distance = target_distance
-
                 # Safety guard: maximum time in terminal guidance exceeded
-                elif (
+                if (
                     self.terminal_entry_time is not None
                     and (self.time - self.terminal_entry_time) >= self.max_terminal_guidance_time
                 ):
                     self.state_machine.transition_to(
                         FlightState.FAILSAFE
                     )
+                else:
+                    # Calculate dynamic energy-aligned breakout geometry
+                    pos = LocalPoint(self.state.x, self.state.y)
+                    geom = calculate_breakout_geometry(
+                        position=pos,
+                        heading=self.state.heading,
+                        target=self.target_position,
+                        forward_speed=self.parafoil_config.forward_speed,
+                        descent_rate=self.parafoil_config.descent_rate,
+                        max_turn_rate=self.parafoil_config.max_turn_rate,
+                        breakout_altitude_margin=self.breakout_altitude_margin,
+                    )
+                    self.last_breakout_geometry = geom
+
+                    # Explicit low-altitude feasibility guard:
+                    # If current altitude is too low to safely execute the required breakout turn,
+                    # do not initiate an aggressive maneuver; enter FAILSAFE.
+                    min_turn_altitude = geom.turn_arc_length / geom.glide_ratio
+                    if self.state.altitude < min_turn_altitude and geom.turn_angle > 0.0:
+                        self.state_machine.transition_to(
+                            FlightState.FAILSAFE
+                        )
+
+                    # Dynamic energy-aligned breakout condition:
+                    # Trigger transition to FINAL_APPROACH when current altitude has depleted
+                    # to the calculated breakout altitude.
+                    elif self.state.altitude <= geom.breakout_altitude:
+                        self.state_machine.transition_to(
+                            FlightState.FINAL_APPROACH
+                        )
+                        self.final_approach_entry_time = self.time
+                        self.final_approach_entry_altitude = self.state.altitude
+                        self.final_approach_entry_distance = target_distance
+                        self.breakout_time = self.time
+                        self.breakout_altitude = self.state.altitude
+                        self.breakout_distance = target_distance
+                        self.breakout_heading = self.state.heading
             else:
                 if (
                     self.terminal_entry_time is not None
@@ -618,6 +687,8 @@ class ParafoilSimulator:
                     self.last_loiter_output = loiter_out
                     self.loiter_history.append((self.time, loiter_out))
                     steering = loiter_out.steering_command
+                    if self.loiter_capture_time is None and loiter_out.phase == LoiterPhase.ORBIT_TRACKING:
+                        self.loiter_capture_time = self.time
 
                     # Track orbit angular progression
                     if self.target_position is not None:

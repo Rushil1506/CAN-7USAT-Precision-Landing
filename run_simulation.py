@@ -9,7 +9,7 @@ from flight.parafoil import (
 from matplotlib.patches import Circle
 from flight.state_machine import FlightState
 from guidance.guidance_controller import GuidanceController
-from guidance.loiter_guidance import LoiterDirection
+from guidance.loiter_guidance import LoiterDirection, LoiterPhase
 from navigation.coordinates import LocalPoint
 from navigation.waypoints import generate_waypoints
 from navigation.waypoint_manager import WaypointManager
@@ -48,6 +48,7 @@ LOITER_RADIUS = 30.0  # [m]
 LOITER_CAPTURE_TOLERANCE = 5.0  # [m]
 LOITER_DIRECTION = LoiterDirection.CLOCKWISE
 MAX_TERMINAL_GUIDANCE_TIME = 120.0  # [s] (simulation safety guard)
+BREAKOUT_ALTITUDE_MARGIN = 2.0  # [m] (energy-aligned dynamic breakout altitude margin)
 
 # These are starting simulation gains, NOT final hardware gains.
 # Input = heading error [deg]
@@ -145,6 +146,7 @@ simulator = ParafoilSimulator(
     loiter_capture_tolerance=LOITER_CAPTURE_TOLERANCE,
     loiter_direction=LOITER_DIRECTION,
     max_terminal_guidance_time=MAX_TERMINAL_GUIDANCE_TIME,
+    breakout_altitude_margin=BREAKOUT_ALTITUDE_MARGIN,
 )
 
 
@@ -172,6 +174,13 @@ def steering_function(time, state):
     steering command [-1, +1]
     """
     global last_guidance
+
+    # When transitioning to FINAL_APPROACH, bypass intermediate en-route waypoints
+    # and reset PID integral memory for direct landing target approach.
+    if simulator.state_machine.get_state() == FlightState.FINAL_APPROACH:
+        if not waypoint_manager.is_complete:
+            waypoint_manager.skip_to_final_target()
+            guidance.pid.reset()
 
     position = LocalPoint(
         x=state.x,
@@ -255,6 +264,15 @@ for sample in history:
         waypoint_distances.append(distance(position, TARGET))
         continue
 
+    if sample.state == FlightState.FINAL_APPROACH:
+        desired = bearing(position, TARGET)
+        err = heading_error(sample.heading, desired)
+        desired_bearings.append(desired)
+        heading_errors.append(err)
+        waypoint_numbers.append(NUM_WAYPOINTS)
+        waypoint_distances.append(distance(position, TARGET))
+        continue
+
     active_manager.update(position)
 
     if active_manager.is_complete:
@@ -274,7 +292,7 @@ for sample in history:
 
 
 # ==================================================
-# Final result
+# Final result & Telemetry Metrics
 # ==================================================
 
 landing_position = LocalPoint(x[-1], y[-1])
@@ -288,32 +306,52 @@ print(f"Initial altitude              : {altitude[0]:.2f} m")
 print(f"Final altitude                : {altitude[-1]:.2f} m")
 print(f"Flight time                   : {time[-1]:.2f} s")
 print(f"Landing position              : X = {x[-1]:.2f} m, Y = {y[-1]:.2f} m")
-print(f"Landing error                 : {landing_error:.2f} m")
+print(f"Landing error                 : {landing_error:.2f} m (vs 23.64 m legacy baseline)")
 print(f"Final waypoint reached        : {waypoint_manager.is_complete}")
 
 if simulator.terminal_entry_time is not None:
     term_duration = (
-        (simulator.final_approach_entry_time - simulator.terminal_entry_time)
-        if simulator.final_approach_entry_time is not None
+        (simulator.breakout_time - simulator.terminal_entry_time)
+        if simulator.breakout_time is not None
         else (time[-1] - simulator.terminal_entry_time)
     )
     print()
     print("--- TERMINAL GUIDANCE (LOITER) METRICS ---")
-    print(f"Terminal entry time           : {simulator.terminal_entry_time:.2f} s")
-    print(f"Terminal entry altitude       : {simulator.terminal_entry_altitude:.2f} m")
-    print(f"Terminal entry distance       : {simulator.terminal_entry_distance:.2f} m")
-    print(f"Terminal entry glide range    : {simulator.terminal_entry_glide_range:.2f} m")
-    print(f"Terminal duration             : {term_duration:.2f} s")
-    print(f"Loiter orbits completed       : {simulator.loiter_orbits_completed:.2f}")
-    print(f"Max radial error during loiter: {simulator.max_radial_error_during_loiter:.2f} m")
-    print(f"Mean radial error during loiter: {simulator.mean_radial_error_during_loiter:.2f} m")
+    print(f"1.  Terminal entry time        : {simulator.terminal_entry_time:.2f} s")
+    print(f"2.  Terminal entry altitude    : {simulator.terminal_entry_altitude:.2f} m")
+    print(f"3.  Terminal entry distance    : {simulator.terminal_entry_distance:.2f} m")
+    print(f"4.  Terminal entry glide range : {simulator.terminal_entry_glide_range:.2f} m")
+    if simulator.loiter_capture_time is not None:
+        print(f"5.  Loiter capture time        : {simulator.loiter_capture_time:.2f} s")
+    else:
+        print(f"5.  Loiter capture time        : N/A")
+    print(f"6.  Loiter tracking duration   : {simulator.loiter_tracking_duration:.2f} s")
+    print(f"7.  Total orbits completed     : {simulator.loiter_orbits_completed:.2f}")
+    print(f"8.  Max radial tracking error  : {simulator.max_radial_error_during_loiter:.2f} m")
+    print(f"9.  Mean radial tracking error : {simulator.mean_radial_error_during_loiter:.2f} m")
+    print(f"    Terminal duration          : {term_duration:.2f} s")
+
+if simulator.breakout_time is not None:
+    print()
+    print("--- ENERGY-ALIGNED BREAKOUT METRICS ---")
+    print(f"10. Breakout time              : {simulator.breakout_time:.2f} s")
+    print(f"11. Breakout altitude          : {simulator.breakout_altitude:.2f} m")
+    print(f"12. Breakout distance          : {simulator.breakout_distance:.2f} m")
+    print(f"13. Breakout heading           : {simulator.breakout_heading:.2f} deg")
 
 if simulator.final_approach_entry_time is not None:
     print()
     print("--- FINAL APPROACH METRICS ---")
-    print(f"Final approach entry time     : {simulator.final_approach_entry_time:.2f} s")
-    print(f"Final approach entry altitude : {simulator.final_approach_entry_altitude:.2f} m")
-    print(f"Final approach entry distance : {simulator.final_approach_entry_distance:.2f} m")
+    print(f"14. Final approach duration    : {simulator.final_approach_duration:.2f} s")
+    print(f"    Final approach entry time  : {simulator.final_approach_entry_altitude:.2f} m" if False else f"    Final approach entry time  : {simulator.final_approach_entry_time:.2f} s")
+    print(f"    Final approach entry alt   : {simulator.final_approach_entry_altitude:.2f} m")
+    print(f"    Final approach entry dist  : {simulator.final_approach_entry_distance:.2f} m")
+
+print()
+print("--- TOUCHDOWN METRICS ---")
+print(f"15. Final touchdown time       : {time[-1]:.2f} s")
+print(f"16. Final touchdown position   : X = {x[-1]:.2f} m, Y = {y[-1]:.2f} m")
+print(f"17. Final touchdown error      : {landing_error:.2f} m (Improvement: {23.64 - landing_error:+.2f} m vs Phase 2.4b.2 baseline)")
 
 print()
 print("--- FLIGHT STATE TIMELINE ---")
@@ -330,28 +368,50 @@ print()
 # Trajectory
 # ==================================================
 
-plt.figure()
+plt.figure(figsize=(10, 8))
 
 # Plot segmented trajectory paths
 prec_x = [s.x for s in history if s.state == FlightState.PRECISION_GUIDANCE]
 prec_y = [s.y for s in history if s.state == FlightState.PRECISION_GUIDANCE]
-term_x = [s.x for s in history if s.state == FlightState.TERMINAL_GUIDANCE]
-term_y = [s.y for s in history if s.state == FlightState.TERMINAL_GUIDANCE]
+cap_x = [s.x for s in history if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_phase == LoiterPhase.ORBIT_CAPTURE]
+cap_y = [s.y for s in history if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_phase == LoiterPhase.ORBIT_CAPTURE]
+trk_x = [s.x for s in history if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_phase == LoiterPhase.ORBIT_TRACKING]
+trk_y = [s.y for s in history if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_phase == LoiterPhase.ORBIT_TRACKING]
 app_x = [s.x for s in history if s.state == FlightState.FINAL_APPROACH]
 app_y = [s.y for s in history if s.state == FlightState.FINAL_APPROACH]
 
 if prec_x:
-    plt.plot(prec_x, prec_y, label="Precision guidance path", color="tab:blue")
-if term_x:
-    plt.plot(term_x, term_y, label="Loiter holding path", color="tab:orange")
+    plt.plot(prec_x, prec_y, label="Precision guidance path", color="tab:blue", lw=1.5)
+if cap_x:
+    plt.plot(cap_x, cap_y, label="Loiter capture phase", color="darkorange", linestyle="--", lw=1.5)
+if trk_x:
+    plt.plot(trk_x, trk_y, label="Loiter orbit tracking phase", color="tab:orange", lw=1.5)
 if app_x:
-    plt.plot(app_x, app_y, label="Final approach path", color="tab:green")
+    plt.plot(app_x, app_y, label="Final approach path", color="tab:green", lw=2.0)
 
 wp_x = [wp.x for wp in waypoints]
 wp_y = [wp.y for wp in waypoints]
-plt.scatter(wp_x, wp_y, marker="o", color="blue", label="Waypoints")
-plt.scatter([START.x], [START.y], marker="s", color="red", label="Deployment")
-plt.scatter([TARGET.x], [TARGET.y], marker="*", s=140, color="gold", edgecolors="black", label="Target")
+plt.scatter(wp_x, wp_y, marker="o", color="blue", s=25, label="Waypoints")
+plt.scatter([START.x], [START.y], marker="s", color="red", s=50, label="Deployment")
+plt.scatter([TARGET.x], [TARGET.y], marker="*", s=160, color="gold", edgecolors="black", zorder=5, label="Landing Target")
+
+# Breakout point marker
+if simulator.breakout_time is not None:
+    brk_samples = [s for s in history if s.time >= simulator.breakout_time]
+    if brk_samples:
+        plt.scatter(
+            [brk_samples[0].x],
+            [brk_samples[0].y],
+            marker="^",
+            s=100,
+            color="magenta",
+            edgecolors="black",
+            zorder=6,
+            label=f"Breakout Point (alt={simulator.breakout_altitude:.1f}m)",
+        )
+
+# Touchdown point marker
+plt.scatter([x[-1]], [y[-1]], marker="X", s=120, color="crimson", edgecolors="black", zorder=6, label=f"Touchdown (error={landing_error:.2f}m)")
 
 # Target acceptance radius
 circle_acc = Circle(
@@ -360,7 +420,8 @@ circle_acc = Circle(
     fill=False,
     linestyle="--",
     color="gray",
-    label="Target acceptance radius (25m)",
+    alpha=0.7,
+    label=f"Target acceptance radius ({WAYPOINT_ACCEPTANCE_RADIUS:.0f}m)",
 )
 plt.gca().add_patch(circle_acc)
 
@@ -370,17 +431,19 @@ circle_loiter = Circle(
     LOITER_RADIUS,
     fill=False,
     linestyle=":",
-    color="orange",
+    color="darkorange",
+    alpha=0.7,
     label=f"Nominal loiter radius ({LOITER_RADIUS:.0f}m)",
 )
 plt.gca().add_patch(circle_loiter)
 
 plt.xlabel("East [m]")
 plt.ylabel("North [m]")
-plt.title("CAN-7USAT Autonomous Guided Descent (with Loiter Holding Orbit)")
+plt.title("CAN-7USAT Autonomous Guided Descent (with Dynamic Energy-Aligned Breakout)")
 plt.axis("equal")
-plt.grid()
-plt.legend()
+plt.grid(True)
+plt.legend(loc="best", fontsize=8)
+plt.savefig("simulation_trajectory.png", dpi=150, bbox_inches="tight")
 
 
 # ==================================================
@@ -397,8 +460,15 @@ plt.axhline(
 plt.axhline(
     FINAL_APPROACH_ALTITUDE,
     linestyle=":",
-    label="Final approach altitude",
+    label="Legacy approach altitude (120m)",
 )
+if simulator.breakout_altitude is not None:
+    plt.axhline(
+        simulator.breakout_altitude,
+        color="magenta",
+        linestyle="--",
+        label=f"Dynamic breakout altitude ({simulator.breakout_altitude:.1f}m)",
+    )
 plt.xlabel("Time [s]")
 plt.ylabel("Altitude [m]")
 plt.title("Altitude vs Time")
@@ -463,3 +533,4 @@ plt.grid()
 plt.legend()
 
 plt.show()
+

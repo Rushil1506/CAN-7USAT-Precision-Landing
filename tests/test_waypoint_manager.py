@@ -40,3 +40,20 @@ def test_large_step_can_skip_reached_waypoints():
 
     assert manager.update(LocalPoint(0.0, 0.0))
     assert manager.is_complete
+
+
+def test_skip_to_final_target():
+    manager = WaypointManager(
+        [
+            LocalPoint(10.0, 0.0),
+            LocalPoint(20.0, 0.0),
+            LocalPoint(30.0, 0.0),
+        ],
+        acceptance_radius=2.0,
+    )
+    assert not manager.is_complete
+    assert manager.waypoint_number == 1
+    manager.skip_to_final_target()
+    assert manager.is_complete
+    assert manager.current_waypoint == LocalPoint(30.0, 0.0)
+    assert manager.target == LocalPoint(30.0, 0.0)

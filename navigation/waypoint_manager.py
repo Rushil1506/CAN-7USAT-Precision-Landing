@@ -89,6 +89,15 @@ class WaypointManager:
 
         return changed
 
+    def skip_to_final_target(self) -> None:
+        """
+        Advance active navigation directly to the final landing target.
+
+        Used when precision guidance or holding orbit transitions directly
+        to final approach to ensure intermediate waypoints are marked complete.
+        """
+        self._current_index = len(self.waypoints)
+
     def reset(self) -> None:
         """Return navigation to waypoint 1."""
         self._current_index = 0

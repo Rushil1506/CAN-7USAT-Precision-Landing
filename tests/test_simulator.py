@@ -375,8 +375,12 @@ def test_final_approach_not_replaced_by_terminal_guidance():
     sim.update_mission_state()
     assert sim.state_machine.get_state() == FlightState.FINAL_APPROACH
 
-    # 2. From TERMINAL_GUIDANCE, final approach conditions transition to FINAL_APPROACH
+    # 2. From TERMINAL_GUIDANCE, high altitude (100m) does not force FINAL_APPROACH,
+    # but once altitude reaches breakout altitude, it transitions to FINAL_APPROACH.
     sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim.update_mission_state()
+    assert sim.state_machine.get_state() == FlightState.TERMINAL_GUIDANCE
+    sim.state.altitude = sim.last_breakout_geometry.breakout_altitude
     sim.update_mission_state()
     assert sim.state_machine.get_state() == FlightState.FINAL_APPROACH
 
@@ -518,12 +522,73 @@ def test_terminal_guidance_orbit_capture_and_tracking_phases():
     assert LoiterPhase.ORBIT_TRACKING in phases
 
 
-def test_terminal_guidance_transitions_to_final_approach_at_configured_altitude():
-    """When altitude drops to <= final_approach_altitude, TERMINAL_GUIDANCE transitions to FINAL_APPROACH."""
+def test_terminal_guidance_remains_active_above_breakout_altitude():
+    """Terminal guidance remains active when current altitude exceeds dynamic breakout altitude."""
     state = ParafoilState(
         x=28.0,
         y=0.0,
-        altitude=125.0,  # Close to 120.0 m final approach altitude
+        altitude=60.0,  # Well above ~15-20 m breakout altitude
+        vx=0.0,
+        vy=0.0,
+        vz=0.0,
+        heading=90.0,
+        heading_rate=0.0,
+    )
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        breakout_altitude_margin=2.0,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim.update_mission_state()
+
+    assert sim.state_machine.get_state() == FlightState.TERMINAL_GUIDANCE
+    assert sim.last_breakout_geometry is not None
+    assert sim.state.altitude > sim.last_breakout_geometry.breakout_altitude
+
+
+def test_terminal_guidance_transitions_to_final_approach_at_breakout_altitude():
+    """When altitude drops to <= breakout_altitude, TERMINAL_GUIDANCE transitions to FINAL_APPROACH."""
+    state = ParafoilState(
+        x=28.0,
+        y=0.0,
+        altitude=22.0,  # Near dynamic breakout altitude (~15-18 m)
+        vx=0.0,
+        vy=0.0,
+        vz=0.0,
+        heading=90.0,
+        heading_rate=0.0,
+    )
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        breakout_altitude_margin=2.0,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+
+    history = sim.run(steering_function=lambda t, st: 0.0, max_time=10.0)
+
+    states = [s.state for s in history]
+    assert FlightState.FINAL_APPROACH in states
+    assert sim.final_approach_entry_time is not None
+    assert sim.final_approach_entry_altitude is not None
+    assert sim.breakout_time is not None
+    assert sim.breakout_altitude is not None
+    assert sim.breakout_altitude <= 22.0
+
+
+def test_fixed_120m_altitude_does_not_force_transition():
+    """Old 120m final_approach_altitude does not independently force transition from TERMINAL_GUIDANCE."""
+    state = ParafoilState(
+        x=28.0,
+        y=0.0,
+        altitude=125.0,
         vx=0.0,
         vy=0.0,
         vz=0.0,
@@ -537,27 +602,178 @@ def test_terminal_guidance_transitions_to_final_approach_at_configured_altitude(
         parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
         target_position=target,
         final_approach_altitude=120.0,
-        final_approach_radius=100.0,
     )
     sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
 
-    external_calls_during_final_approach = 0
-
-    def steering_cb(t, st):
-        nonlocal external_calls_during_final_approach
-        if sim.state_machine.get_state() == FlightState.FINAL_APPROACH:
-            external_calls_during_final_approach += 1
-        return 0.0
-
-    history = sim.run(steering_function=steering_cb, max_time=10.0)
+    # Run for 5 seconds (altitude drops from 125 to 112.5 m, crossing 120 m)
+    history = sim.run(steering_function=lambda t, s: 0.0, max_time=5.0)
 
     states = [s.state for s in history]
-    assert FlightState.FINAL_APPROACH in states
-    assert sim.final_approach_entry_time is not None
-    assert sim.final_approach_entry_altitude is not None
-    assert sim.final_approach_entry_altitude <= 120.0
-    # External steering function was resumed in FINAL_APPROACH
-    assert external_calls_during_final_approach > 0
+    assert FlightState.FINAL_APPROACH not in states
+    assert sim.state_machine.get_state() == FlightState.TERMINAL_GUIDANCE
+
+
+def test_breakout_altitude_margin_affects_transition():
+    """Higher breakout altitude margin triggers transition to FINAL_APPROACH earlier (at higher altitude)."""
+    state0 = ParafoilState(x=28.0, y=0.0, altitude=30.0, vx=0.0, vy=0.0, vz=0.0, heading=90.0, heading_rate=0.0)
+    state5 = ParafoilState(x=28.0, y=0.0, altitude=30.0, vx=0.0, vy=0.0, vz=0.0, heading=90.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+
+    sim0 = ParafoilSimulator(
+        state=state0,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        breakout_altitude_margin=0.0,
+    )
+    sim0.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim0.run(steering_function=lambda t, s: 0.0, max_time=10.0)
+
+    sim5 = ParafoilSimulator(
+        state=state5,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        breakout_altitude_margin=5.0,
+    )
+    sim5.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim5.run(steering_function=lambda t, s: 0.0, max_time=10.0)
+
+    assert sim0.breakout_altitude is not None
+    assert sim5.breakout_altitude is not None
+    assert sim5.breakout_altitude > sim0.breakout_altitude
+    assert sim5.breakout_time < sim0.breakout_time
+
+
+def test_breakout_works_with_clockwise_loiter():
+    """Energy-aligned breakout operates correctly with CLOCKWISE loiter direction."""
+    state = ParafoilState(x=30.0, y=0.0, altitude=25.0, vx=0.0, vy=0.0, vz=0.0, heading=180.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        loiter_direction=LoiterDirection.CLOCKWISE,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim.run(steering_function=lambda t, s: 0.0, max_time=10.0)
+
+    assert sim.state_machine.get_state() in (FlightState.FINAL_APPROACH, FlightState.LANDING)
+    assert sim.breakout_time is not None
+
+
+def test_breakout_works_with_counter_clockwise_loiter():
+    """Energy-aligned breakout operates correctly with COUNTER_CLOCKWISE loiter direction."""
+    state = ParafoilState(x=30.0, y=0.0, altitude=25.0, vx=0.0, vy=0.0, vz=0.0, heading=0.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        loiter_direction=LoiterDirection.COUNTER_CLOCKWISE,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim.run(steering_function=lambda t, s: 0.0, max_time=10.0)
+
+    assert sim.state_machine.get_state() in (FlightState.FINAL_APPROACH, FlightState.LANDING)
+    assert sim.breakout_time is not None
+
+
+def test_final_approach_resumes_external_steering():
+    """External steering callback is resumed and called during FINAL_APPROACH."""
+    state = ParafoilState(x=28.0, y=0.0, altitude=22.0, vx=0.0, vy=0.0, vz=0.0, heading=90.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+
+    external_calls = 0
+
+    def steering_cb(t, st):
+        nonlocal external_calls
+        if sim.state_machine.get_state() == FlightState.FINAL_APPROACH:
+            external_calls += 1
+        return 0.0
+
+    sim.run(steering_function=steering_cb, max_time=10.0)
+    assert external_calls > 0
+
+
+def test_breakout_transition_continuity():
+    """Ensure kinematic state continuity (no position or altitude jumping) across breakout transition."""
+    state = ParafoilState(x=28.0, y=0.0, altitude=25.0, vx=0.0, vy=0.0, vz=0.0, heading=90.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+        dt=0.1,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    history = sim.run(steering_function=lambda t, s: 0.0, max_time=10.0)
+
+    trans_idx = None
+    for i in range(len(history) - 1):
+        if history[i].state == FlightState.TERMINAL_GUIDANCE and history[i + 1].state == FlightState.FINAL_APPROACH:
+            trans_idx = i
+            break
+
+    assert trans_idx is not None
+    s_before = history[trans_idx]
+    s_after = history[trans_idx + 1]
+
+    dx = s_after.x - s_before.x
+    dy = s_after.y - s_before.y
+    horiz_jump = (dx * dx + dy * dy) ** 0.5
+    vert_jump = abs(s_after.altitude - s_before.altitude)
+
+    # In 0.1s at 8 m/s, max horizontal travel is 0.8m
+    assert horiz_jump < 1.0
+    # In 0.1s at 2.5 m/s descent, altitude change is 0.25m
+    assert vert_jump < 0.35
+
+
+def test_low_altitude_infeasibility_triggers_failsafe():
+    """Low-altitude guard triggers FAILSAFE if altitude is insufficient to complete breakout turn."""
+    # Heading 90 deg, target at (0,0), position at (20, 0). Heading points away from target.
+    # Required turn is ~180 deg, min turn altitude L_turn / G ≈ 20 m.
+    # At altitude 2.0 m, vehicle cannot turn in time, so failsafe is triggered.
+    state = ParafoilState(x=20.0, y=0.0, altitude=2.0, vx=0.0, vy=0.0, vz=0.0, heading=90.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5, max_turn_rate=30.0),
+        target_position=target,
+    )
+    sim.state_machine.state = FlightState.TERMINAL_GUIDANCE
+    sim.update_mission_state()
+
+    assert sim.state_machine.get_state() == FlightState.FAILSAFE
+
+
+def test_landing_from_final_approach():
+    """Verify clean landing transition when altitude reaches 0 in FINAL_APPROACH."""
+    state = ParafoilState(x=5.0, y=0.0, altitude=1.0, vx=0.0, vy=0.0, vz=0.0, heading=0.0, heading_rate=0.0)
+    target = LocalPoint(0.0, 0.0)
+    sim = ParafoilSimulator(
+        state=state,
+        drogue_config=DrogueConfig(),
+        parafoil_config=ParafoilConfig(forward_speed=8.0, descent_rate=2.5),
+        target_position=target,
+    )
+    sim.state_machine.state = FlightState.FINAL_APPROACH
+    history = sim.run(steering_function=lambda t, s: 0.0, max_time=2.0)
+
+    assert sim.state_machine.get_state() == FlightState.LANDING
+    assert history[-1].state == FlightState.LANDING
 
 
 def test_terminal_guidance_timeout_triggers_failsafe():
@@ -607,4 +823,19 @@ def test_invalid_loiter_parameters_raise():
 
     with pytest.raises(ValueError, match="Max terminal guidance time must be greater than zero"):
         ParafoilSimulator(state=state, drogue_config=drogue, parafoil_config=parafoil, max_terminal_guidance_time=0.0)
+
+
+def test_invalid_breakout_margin_raises():
+    """Verify rejection of negative breakout altitude margin in simulator constructor."""
+    state = ParafoilState(x=0.0, y=0.0, altitude=500.0, vx=0.0, vy=0.0, vz=0.0, heading=0.0, heading_rate=0.0)
+    drogue = DrogueConfig()
+    parafoil = ParafoilConfig()
+
+    with pytest.raises(ValueError, match="Breakout altitude margin cannot be negative"):
+        ParafoilSimulator(
+            state=state,
+            drogue_config=drogue,
+            parafoil_config=parafoil,
+            breakout_altitude_margin=-1.0,
+        )
 
