@@ -47,9 +47,20 @@ def test_drogue_has_no_steering():
 
     assert math.isclose(state.heading_rate, 0.0)
 
-    assert math.isclose(state.vx, 0.0)
 
-    assert math.isclose(state.vy, 0.0)
+def test_drogue_wind_drift():
+
+    model, state = create_model()
+    
+    model.parafoil_config.wind_x = 5.0
+    model.parafoil_config.wind_y = -3.0
+
+    model.update_drogue(dt=1.0)
+
+    assert math.isclose(state.vx, 5.0)
+    assert math.isclose(state.vy, -3.0)
+    assert math.isclose(state.x, 5.0)
+    assert math.isclose(state.y, -3.0)
 
 
 def test_parafoil_forward_motion_north():
@@ -113,3 +124,48 @@ def test_altitude_never_negative():
     model.update_parafoil(steering=0.0, dt=1.0)
 
     assert state.altitude == 0.0
+
+def test_parafoil_wind_north():
+    model, state = create_model()
+    model.parafoil_config.wind_y = 5.0
+    model.update_parafoil(steering=0.0, dt=1.0)
+    assert math.isclose(state.vy, 15.0) # 10 (forward speed) + 5
+    assert math.isclose(state.vx, 0.0)
+
+def test_parafoil_wind_south():
+    model, state = create_model()
+    model.parafoil_config.wind_y = -5.0
+    model.update_parafoil(steering=0.0, dt=1.0)
+    assert math.isclose(state.vy, 5.0)
+    assert math.isclose(state.vx, 0.0)
+
+def test_parafoil_wind_east():
+    model, state = create_model()
+    model.parafoil_config.wind_x = 5.0
+    model.update_parafoil(steering=0.0, dt=1.0)
+    assert math.isclose(state.vx, 5.0)
+    assert math.isclose(state.vy, 10.0)
+
+def test_parafoil_wind_west():
+    model, state = create_model()
+    model.parafoil_config.wind_x = -5.0
+    model.update_parafoil(steering=0.0, dt=1.0)
+    assert math.isclose(state.vx, -5.0)
+    assert math.isclose(state.vy, 10.0)
+
+def test_parafoil_wind_diagonal():
+    model, state = create_model()
+    model.parafoil_config.wind_x = 3.0
+    model.parafoil_config.wind_y = -4.0
+    model.update_parafoil(steering=0.0, dt=1.0)
+    assert math.isclose(state.vx, 3.0)
+    assert math.isclose(state.vy, 6.0)
+
+def test_parafoil_wind_updates_position():
+    model, state = create_model()
+    model.parafoil_config.wind_x = 2.0
+    model.parafoil_config.wind_y = 2.0
+    model.update_parafoil(steering=0.0, dt=2.0)
+    # v_air = 10 (north). vx = 2. vy = 12.
+    assert math.isclose(state.x, 4.0)
+    assert math.isclose(state.y, 24.0)

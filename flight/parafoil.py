@@ -133,11 +133,14 @@ class ParafoilModel:
         # Horizontal velocity
         #
         # At this stage we assume no intentional forward
-        # flight. Wind will be added by the simulator later.
+        # flight. Horizontal motion is entirely driven by wind.
         # --------------------------------------------------
 
-        self.state.vx = 0.0
-        self.state.vy = 0.0
+        self.state.vx = self.parafoil_config.wind_x
+        self.state.vy = self.parafoil_config.wind_y
+
+        self.state.x += self.state.vx * dt
+        self.state.y += self.state.vy * dt
 
         # --------------------------------------------------
         # No intentional heading control

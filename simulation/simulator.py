@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -54,6 +55,11 @@ class SimulationSample:
 
     state: FlightState
 
+    # Telemetry
+    ground_speed: float
+    course_over_ground: float
+    crab_angle: float
+
     # Loiter holding orbit telemetry (populated when in TERMINAL_GUIDANCE)
     loiter_phase: Optional[LoiterPhase] = None
     loiter_radial_distance: Optional[float] = None
@@ -107,6 +113,8 @@ class ParafoilSimulator:
         max_terminal_guidance_time: float = 120.0,
         loiter_guidance: Optional[LoiterGuidance] = None,
         breakout_altitude_margin: float = 2.0,
+        wind_x: float = 0.0,
+        wind_y: float = 0.0,
     ):
 
         # --------------------------------------------------
@@ -152,6 +160,10 @@ class ParafoilSimulator:
 
         self.state = state
         self.parafoil_config = parafoil_config
+        
+        # Override config wind fields for convenience as required by single source of truth rule
+        self.parafoil_config.wind_x = wind_x
+        self.parafoil_config.wind_y = wind_y
 
         self.model = ParafoilModel(
             state=state,
@@ -315,6 +327,16 @@ class ParafoilSimulator:
                 breakout_req_alt = self.last_breakout_geometry.minimum_required_altitude
                 breakout_thresh = self.last_breakout_geometry.breakout_altitude
 
+        # Telemetry calculations
+        gs = math.hypot(self.state.vx, self.state.vy)
+        
+        if gs > 1e-6:
+            cog = math.degrees(math.atan2(self.state.vx, self.state.vy)) % 360.0
+        else:
+            cog = self.state.heading
+            
+        crab = (cog - self.state.heading + 180.0) % 360.0 - 180.0
+
         self.history.append(
             SimulationSample(
                 time=self.time,
@@ -328,6 +350,9 @@ class ParafoilSimulator:
                 heading_rate=self.state.heading_rate,
                 steering=steering,
                 state=current_state,
+                ground_speed=gs,
+                course_over_ground=cog,
+                crab_angle=crab,
                 loiter_phase=loiter_phase,
                 loiter_radial_distance=loiter_r_dist,
                 loiter_radial_error=loiter_r_err,

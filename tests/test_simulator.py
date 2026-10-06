@@ -839,3 +839,101 @@ def test_invalid_breakout_margin_raises():
             breakout_altitude_margin=-1.0,
         )
 
+
+# =====================================================================
+# Phase 3.1 Wind Telemetry Tests
+# =====================================================================
+
+def test_simulator_telemetry_zero_wind():
+    sim = create_simulator()
+    sim.state.heading = 90.0
+    sim.state_machine.state = FlightState.PRECISION_GUIDANCE
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.ground_speed, 8.0)
+    assert math.isclose(s.course_over_ground, 90.0)
+    assert math.isclose(s.crab_angle, 0.0)
+
+
+def test_simulator_telemetry_headwind():
+    sim = create_simulator()
+    sim.state.heading = 0.0
+    sim.parafoil_config.wind_y = -3.0
+    sim.state_machine.state = FlightState.PRECISION_GUIDANCE
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.ground_speed, 5.0)
+    assert math.isclose(s.course_over_ground, 0.0)
+    assert math.isclose(s.crab_angle, 0.0)
+
+
+def test_simulator_telemetry_tailwind():
+    sim = create_simulator()
+    sim.state.heading = 0.0
+    sim.parafoil_config.wind_y = 3.0
+    sim.state_machine.state = FlightState.PRECISION_GUIDANCE
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.ground_speed, 11.0)
+    assert math.isclose(s.course_over_ground, 0.0)
+    assert math.isclose(s.crab_angle, 0.0)
+
+
+def test_simulator_telemetry_crosswind():
+    sim = create_simulator()
+    sim.state.heading = 0.0
+    sim.parafoil_config.wind_x = 6.0
+    sim.state_machine.state = FlightState.PRECISION_GUIDANCE
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.ground_speed, 10.0)
+    expected_cog = math.degrees(math.atan2(6.0, 8.0))
+    assert math.isclose(s.course_over_ground, expected_cog)
+    assert math.isclose(s.crab_angle, expected_cog)
+
+
+def test_simulator_telemetry_diagonal_wind():
+    sim = create_simulator()
+    sim.state.heading = 45.0
+    sim.parafoil_config.wind_x = 2.0
+    sim.parafoil_config.wind_y = -2.0
+    sim.state_machine.state = FlightState.PRECISION_GUIDANCE
+    sim.step()
+    s = sim.history[-1]
+    expected_vx = 8.0 * math.sin(math.radians(45.0)) + 2.0
+    expected_vy = 8.0 * math.cos(math.radians(45.0)) - 2.0
+    assert math.isclose(s.ground_speed, math.hypot(expected_vx, expected_vy))
+
+
+def test_simulator_drogue_wind_drift():
+    sim = create_simulator()
+    sim.parafoil_config.wind_x = 5.0
+    sim.parafoil_config.wind_y = -5.0
+    sim.state_machine.state = FlightState.DROGUE_DESCENT
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.vx, 5.0)
+    assert math.isclose(s.vy, -5.0)
+    assert math.isclose(s.ground_speed, math.hypot(5.0, -5.0))
+
+
+def test_simulator_crab_angle_wrap():
+    sim = create_simulator()
+    sim.state.heading = 350.0
+    sim.state_machine.state = FlightState.DROGUE_DESCENT
+    sim.parafoil_config.wind_x = math.sin(math.radians(10.0))
+    sim.parafoil_config.wind_y = math.cos(math.radians(10.0))
+    sim.step()
+    s = sim.history[-1]
+    assert math.isclose(s.course_over_ground, 10.0)
+    assert math.isclose(s.crab_angle, 20.0)
+    
+    sim2 = create_simulator()
+    sim2.state.heading = 10.0
+    sim2.state_machine.state = FlightState.DROGUE_DESCENT
+    sim2.parafoil_config.wind_x = math.sin(math.radians(350.0))
+    sim2.parafoil_config.wind_y = math.cos(math.radians(350.0))
+    sim2.step()
+    s2 = sim2.history[-1]
+    assert math.isclose(s2.course_over_ground, 350.0)
+    assert math.isclose(s2.crab_angle, -20.0)
