@@ -36,3 +36,11 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*_validation_trajectory.png
+simulation_trajectory.png
+zero_wind_robustness.png
+zero_wind_robustness_results.csv
