@@ -7,9 +7,10 @@ class FlightState(Enum):
     DROGUE_DESCENT = 2
     PARAFOIL_DEPLOYMENT = 3
     PRECISION_GUIDANCE = 4
-    FINAL_APPROACH = 5
-    LANDING = 6
-    FAILSAFE = 7
+    TERMINAL_GUIDANCE = 5
+    FINAL_APPROACH = 6
+    LANDING = 7
+    FAILSAFE = 8
 
 
 # --------------------------------------------------
@@ -25,6 +26,12 @@ VALID_TRANSITIONS = {
         FlightState.FAILSAFE,
     },
     FlightState.PRECISION_GUIDANCE: {
+        FlightState.TERMINAL_GUIDANCE,
+        FlightState.FINAL_APPROACH,
+        FlightState.LANDING,
+        FlightState.FAILSAFE,
+    },
+    FlightState.TERMINAL_GUIDANCE: {
         FlightState.FINAL_APPROACH,
         FlightState.LANDING,
         FlightState.FAILSAFE,

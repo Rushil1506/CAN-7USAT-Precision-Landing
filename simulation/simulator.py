@@ -4,6 +4,8 @@ from typing import Callable, List, Optional
 from navigation.coordinates import LocalPoint
 from navigation.distance import distance
 
+from guidance.terminal_guidance import should_enter_terminal_guidance
+
 from flight.parafoil import (
     ParafoilState,
     ParafoilConfig,
@@ -76,6 +78,7 @@ class ParafoilSimulator:
         target_position: Optional[LocalPoint] = None,
         final_approach_altitude: float = 120.0,
         final_approach_radius: float = 100.0,
+        terminal_margin: float = 100.0,
     ):
 
         # --------------------------------------------------
@@ -97,11 +100,15 @@ class ParafoilSimulator:
         if final_approach_radius <= 0.0:
             raise ValueError("Final approach radius must be greater than zero")
 
+        if terminal_margin < 0.0:
+            raise ValueError("Terminal margin cannot be negative")
+
         # --------------------------------------------------
         # Store flight model
         # --------------------------------------------------
 
         self.state = state
+        self.parafoil_config = parafoil_config
 
         self.model = ParafoilModel(
             state=state,
@@ -123,6 +130,7 @@ class ParafoilSimulator:
         self.target_position = target_position
         self.final_approach_altitude = final_approach_altitude
         self.final_approach_radius = final_approach_radius
+        self.terminal_margin = terminal_margin
 
         # --------------------------------------------------
         # Simulation time
@@ -226,7 +234,7 @@ class ParafoilSimulator:
                 self.state_machine.transition_to(FlightState.PRECISION_GUIDANCE)
 
         # --------------------------------------------------
-        # PRECISION GUIDANCE → FINAL APPROACH
+        # PRECISION GUIDANCE → FINAL APPROACH / TERMINAL GUIDANCE
         # --------------------------------------------------
 
         current_state = self.state_machine.get_state()
@@ -247,8 +255,39 @@ class ParafoilSimulator:
                         FlightState.FINAL_APPROACH
                     )
 
+                elif should_enter_terminal_guidance(
+                    altitude=self.state.altitude,
+                    horizontal_speed=self.parafoil_config.forward_speed,
+                    descent_rate=self.parafoil_config.descent_rate,
+                    target_distance=target_distance,
+                    terminal_margin=self.terminal_margin,
+                ):
+                    self.state_machine.transition_to(
+                        FlightState.TERMINAL_GUIDANCE
+                    )
+
         # --------------------------------------------------
-        # PRECISION GUIDANCE / FINAL APPROACH → LANDING
+        # TERMINAL GUIDANCE → FINAL APPROACH
+        # --------------------------------------------------
+
+        elif current_state == FlightState.TERMINAL_GUIDANCE:
+
+            if self.target_position is not None:
+                target_distance = distance(
+                    LocalPoint(self.state.x, self.state.y),
+                    self.target_position,
+                )
+
+                if (
+                    self.state.altitude <= self.final_approach_altitude
+                    and target_distance <= self.final_approach_radius
+                ):
+                    self.state_machine.transition_to(
+                        FlightState.FINAL_APPROACH
+                    )
+
+        # --------------------------------------------------
+        # PRECISION GUIDANCE / TERMINAL GUIDANCE / FINAL APPROACH → LANDING
         # --------------------------------------------------
 
         current_state = self.state_machine.get_state()
@@ -257,6 +296,7 @@ class ParafoilSimulator:
 
             if current_state in {
                 FlightState.PRECISION_GUIDANCE,
+                FlightState.TERMINAL_GUIDANCE,
                 FlightState.FINAL_APPROACH,
             }:
                 self.state_machine.transition_to(FlightState.LANDING)
@@ -301,6 +341,15 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.PRECISION_GUIDANCE:
 
+            self.model.update_parafoil(steering=steering, dt=self.dt)
+
+        # --------------------------------------------------
+        # TERMINAL GUIDANCE
+        # --------------------------------------------------
+
+        elif current_state == FlightState.TERMINAL_GUIDANCE:
+
+            # Safe placeholder behavior: kinematic parafoil update without premature maneuver
             self.model.update_parafoil(steering=steering, dt=self.dt)
 
         # --------------------------------------------------
@@ -395,6 +444,7 @@ class ParafoilSimulator:
 
             if current_state in {
                 FlightState.PRECISION_GUIDANCE,
+                FlightState.TERMINAL_GUIDANCE,
                 FlightState.FINAL_APPROACH,
             }:
 

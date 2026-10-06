@@ -115,3 +115,69 @@ def test_landing_is_terminal():
     machine.transition_to(FlightState.LANDING)
 
     assert machine.get_state() == FlightState.LANDING
+
+
+def test_precision_guidance_to_terminal_guidance():
+    machine = FlightStateMachine()
+    machine.transition_to(FlightState.WAITING)
+    machine.transition_to(FlightState.DROGUE_DESCENT)
+    machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
+    machine.transition_to(FlightState.PRECISION_GUIDANCE)
+
+    machine.transition_to(FlightState.TERMINAL_GUIDANCE)
+    assert machine.get_state() == FlightState.TERMINAL_GUIDANCE
+
+
+def test_terminal_guidance_to_final_approach():
+    machine = FlightStateMachine()
+    machine.transition_to(FlightState.WAITING)
+    machine.transition_to(FlightState.DROGUE_DESCENT)
+    machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
+    machine.transition_to(FlightState.PRECISION_GUIDANCE)
+    machine.transition_to(FlightState.TERMINAL_GUIDANCE)
+
+    machine.transition_to(FlightState.FINAL_APPROACH)
+    assert machine.get_state() == FlightState.FINAL_APPROACH
+
+
+def test_terminal_guidance_to_landing():
+    machine = FlightStateMachine()
+    machine.transition_to(FlightState.WAITING)
+    machine.transition_to(FlightState.DROGUE_DESCENT)
+    machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
+    machine.transition_to(FlightState.PRECISION_GUIDANCE)
+    machine.transition_to(FlightState.TERMINAL_GUIDANCE)
+
+    machine.transition_to(FlightState.LANDING)
+    assert machine.get_state() == FlightState.LANDING
+
+
+def test_terminal_guidance_to_failsafe():
+    machine = FlightStateMachine()
+    machine.transition_to(FlightState.WAITING)
+    machine.transition_to(FlightState.DROGUE_DESCENT)
+    machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
+    machine.transition_to(FlightState.PRECISION_GUIDANCE)
+    machine.transition_to(FlightState.TERMINAL_GUIDANCE)
+
+    machine.transition_to(FlightState.FAILSAFE)
+    assert machine.get_state() == FlightState.FAILSAFE
+
+
+@pytest.mark.parametrize(
+    "source_state",
+    [
+        FlightState.BOOT,
+        FlightState.WAITING,
+        FlightState.DROGUE_DESCENT,
+        FlightState.PARAFOIL_DEPLOYMENT,
+        FlightState.FINAL_APPROACH,
+        FlightState.LANDING,
+        FlightState.FAILSAFE,
+    ],
+)
+def test_invalid_transitions_to_terminal_guidance(source_state):
+    machine = FlightStateMachine()
+    machine.state = source_state
+    with pytest.raises(ValueError):
+        machine.transition_to(FlightState.TERMINAL_GUIDANCE)

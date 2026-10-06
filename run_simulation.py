@@ -38,6 +38,7 @@ WAYPOINT_ACCEPTANCE_RADIUS = 25.0  # [m]
 
 FINAL_APPROACH_ALTITUDE = 120.0  # [m]
 FINAL_APPROACH_RADIUS = 100.0  # [m]
+TERMINAL_MARGIN = 100.0  # [m]
 
 # These are starting simulation gains, NOT final hardware gains.
 # Input = heading error [deg]
@@ -129,6 +130,7 @@ simulator = ParafoilSimulator(
     target_position=TARGET,
     final_approach_altitude=FINAL_APPROACH_ALTITUDE,
     final_approach_radius=FINAL_APPROACH_RADIUS,
+    terminal_margin=TERMINAL_MARGIN,
 )
 
 
@@ -219,6 +221,7 @@ waypoint_distances = []
 for sample in history:
     if sample.state not in {
         FlightState.PRECISION_GUIDANCE,
+        FlightState.TERMINAL_GUIDANCE,
         FlightState.FINAL_APPROACH,
     }:
         desired_bearings.append(float("nan"))
