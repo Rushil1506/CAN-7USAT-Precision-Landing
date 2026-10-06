@@ -79,6 +79,7 @@ class ParafoilSimulator:
         final_approach_altitude: float = 120.0,
         final_approach_radius: float = 100.0,
         terminal_margin: float = 100.0,
+        terminal_capture_radius: float = 200.0,
     ):
 
         # --------------------------------------------------
@@ -102,6 +103,9 @@ class ParafoilSimulator:
 
         if terminal_margin < 0.0:
             raise ValueError("Terminal margin cannot be negative")
+
+        if terminal_capture_radius <= 0.0:
+            raise ValueError("Terminal capture radius must be greater than zero")
 
         # --------------------------------------------------
         # Store flight model
@@ -131,6 +135,7 @@ class ParafoilSimulator:
         self.final_approach_altitude = final_approach_altitude
         self.final_approach_radius = final_approach_radius
         self.terminal_margin = terminal_margin
+        self.terminal_capture_radius = terminal_capture_radius
 
         # --------------------------------------------------
         # Simulation time
@@ -261,6 +266,7 @@ class ParafoilSimulator:
                     descent_rate=self.parafoil_config.descent_rate,
                     target_distance=target_distance,
                     terminal_margin=self.terminal_margin,
+                    terminal_capture_radius=self.terminal_capture_radius,
                 ):
                     self.state_machine.transition_to(
                         FlightState.TERMINAL_GUIDANCE

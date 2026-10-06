@@ -204,3 +204,129 @@ def test_evaluate_from_config():
     assert decision.should_enter_terminal
     assert math.isclose(decision.glide_range, 1920.0)
     assert math.isclose(decision.excess_range, 620.0)
+
+
+def test_spatial_gate_prevents_entry_when_outside_capture_radius():
+    """Rg is sufficient (1920m >= 1300m), but Dt (1200m) > R_capture (200m) -> remain DIRECT_GUIDANCE."""
+    decision = evaluate_terminal_guidance(
+        altitude=600.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=1200.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+    assert decision.mode == GuidanceMode.DIRECT_GUIDANCE
+    assert not decision.should_enter_terminal
+    assert decision.energy_condition
+    assert not decision.spatial_capture
+    assert decision.capture_radius == 200.0
+    assert not should_enter_terminal_guidance(
+        altitude=600.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=1200.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+
+
+def test_spatial_gate_allows_entry_when_within_capture_radius_and_energy_sufficient():
+    """Dt (150m) <= R_capture (200m) AND Rg (960m) >= Dt + M (250m) -> enter TERMINAL_GUIDANCE."""
+    decision = evaluate_terminal_guidance(
+        altitude=300.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=150.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+    assert decision.mode == GuidanceMode.TERMINAL_GUIDANCE
+    assert decision.should_enter_terminal
+    assert decision.energy_condition
+    assert decision.spatial_capture
+    assert should_enter_terminal_guidance(
+        altitude=300.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=150.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+
+
+def test_insufficient_energy_prevents_entry_even_within_capture_radius():
+    """Dt (180m) <= R_capture (200m), but Rg (160m) < Dt + M (230m) -> remain DIRECT_GUIDANCE."""
+    decision = evaluate_terminal_guidance(
+        altitude=50.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=180.0,
+        terminal_margin=50.0,
+        terminal_capture_radius=200.0,
+    )
+    assert decision.mode == GuidanceMode.DIRECT_GUIDANCE
+    assert not decision.should_enter_terminal
+    assert not decision.energy_condition
+    assert decision.spatial_capture
+    assert not should_enter_terminal_guidance(
+        altitude=50.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=180.0,
+        terminal_margin=50.0,
+        terminal_capture_radius=200.0,
+    )
+
+
+def test_exact_capture_radius_boundary():
+    """Exact boundary Dt == R_capture satisfies spatial gate."""
+    # Dt = 200.0 == R_capture = 200.0
+    # Rg = 1920.0 >= 300.0
+    decision = evaluate_terminal_guidance(
+        altitude=600.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=200.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+    assert decision.spatial_capture
+    assert decision.energy_condition
+    assert decision.should_enter_terminal
+    assert decision.mode == GuidanceMode.TERMINAL_GUIDANCE
+
+
+def test_configured_capture_radius_is_used():
+    """Varying R_capture switches between DIRECT_GUIDANCE and TERMINAL_GUIDANCE."""
+    # Dt = 250m, Rg = 1920m >= 350m
+    d_tight = evaluate_terminal_guidance(
+        altitude=600.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=250.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=200.0,
+    )
+    assert d_tight.mode == GuidanceMode.DIRECT_GUIDANCE
+    assert not d_tight.should_enter_terminal
+
+    d_wide = evaluate_terminal_guidance(
+        altitude=600.0,
+        horizontal_speed=8.0,
+        descent_rate=2.5,
+        target_distance=250.0,
+        terminal_margin=100.0,
+        terminal_capture_radius=300.0,
+    )
+    assert d_wide.mode == GuidanceMode.TERMINAL_GUIDANCE
+    assert d_wide.should_enter_terminal
+
+
+def test_invalid_capture_radius_raises():
+    """Zero or negative capture radius must raise ValueError."""
+    with pytest.raises(ValueError, match="terminal_capture_radius must be greater than zero"):
+        evaluate_terminal_guidance(600.0, 8.0, 2.5, 100.0, 50.0, terminal_capture_radius=0.0)
+
+    with pytest.raises(ValueError, match="terminal_capture_radius must be greater than zero"):
+        evaluate_terminal_guidance(600.0, 8.0, 2.5, 100.0, 50.0, terminal_capture_radius=-50.0)

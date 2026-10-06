@@ -39,6 +39,8 @@ WAYPOINT_ACCEPTANCE_RADIUS = 25.0  # [m]
 FINAL_APPROACH_ALTITUDE = 120.0  # [m]
 FINAL_APPROACH_RADIUS = 100.0  # [m]
 TERMINAL_MARGIN = 100.0  # [m]
+# Placeholder simulation parameter, not a final hardware/flight value.
+TERMINAL_CAPTURE_RADIUS = 200.0  # [m]
 
 # These are starting simulation gains, NOT final hardware gains.
 # Input = heading error [deg]
@@ -131,6 +133,7 @@ simulator = ParafoilSimulator(
     final_approach_altitude=FINAL_APPROACH_ALTITUDE,
     final_approach_radius=FINAL_APPROACH_RADIUS,
     terminal_margin=TERMINAL_MARGIN,
+    terminal_capture_radius=TERMINAL_CAPTURE_RADIUS,
 )
 
 
