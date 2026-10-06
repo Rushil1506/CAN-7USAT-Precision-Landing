@@ -1,10 +1,17 @@
 from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
+from navigation.bearing import bearing
 from navigation.coordinates import LocalPoint
 from navigation.distance import distance
 
 from guidance.terminal_guidance import should_enter_terminal_guidance
+from guidance.loiter_guidance import (
+    LoiterDirection,
+    LoiterGuidance,
+    LoiterGuidanceOutput,
+    LoiterPhase,
+)
 
 from flight.parafoil import (
     ParafoilState,
@@ -43,6 +50,12 @@ class SimulationSample:
 
     state: FlightState
 
+    # Loiter holding orbit telemetry (populated when in TERMINAL_GUIDANCE)
+    loiter_phase: Optional[LoiterPhase] = None
+    loiter_radial_distance: Optional[float] = None
+    loiter_radial_error: Optional[float] = None
+    loiter_desired_heading: Optional[float] = None
+
 
 class ParafoilSimulator:
     """
@@ -80,6 +93,11 @@ class ParafoilSimulator:
         final_approach_radius: float = 100.0,
         terminal_margin: float = 100.0,
         terminal_capture_radius: float = 200.0,
+        loiter_radius: float = 30.0,
+        loiter_capture_tolerance: float = 5.0,
+        loiter_direction: LoiterDirection = LoiterDirection.CLOCKWISE,
+        max_terminal_guidance_time: float = 120.0,
+        loiter_guidance: Optional[LoiterGuidance] = None,
     ):
 
         # --------------------------------------------------
@@ -106,6 +124,15 @@ class ParafoilSimulator:
 
         if terminal_capture_radius <= 0.0:
             raise ValueError("Terminal capture radius must be greater than zero")
+
+        if loiter_radius <= 0.0:
+            raise ValueError("Loiter radius must be greater than zero")
+
+        if loiter_capture_tolerance <= 0.0:
+            raise ValueError("Loiter capture tolerance must be greater than zero")
+
+        if max_terminal_guidance_time <= 0.0:
+            raise ValueError("Max terminal guidance time must be greater than zero")
 
         # --------------------------------------------------
         # Store flight model
@@ -137,6 +164,41 @@ class ParafoilSimulator:
         self.terminal_margin = terminal_margin
         self.terminal_capture_radius = terminal_capture_radius
 
+        # Loiter holding orbit parameters (simulation/prototyping values)
+        self.loiter_radius = loiter_radius
+        self.loiter_capture_tolerance = loiter_capture_tolerance
+        self.loiter_direction = loiter_direction
+        self.max_terminal_guidance_time = max_terminal_guidance_time
+
+        if loiter_guidance is not None:
+            self.loiter_guidance = loiter_guidance
+        elif self.target_position is not None:
+            self.loiter_guidance = LoiterGuidance(
+                center=self.target_position,
+                loiter_radius=self.loiter_radius,
+                direction=self.loiter_direction,
+                capture_tolerance=self.loiter_capture_tolerance,
+                forward_speed=self.parafoil_config.forward_speed,
+                max_turn_rate=self.parafoil_config.max_turn_rate,
+            )
+        else:
+            self.loiter_guidance = None
+
+        self.last_loiter_output: Optional[LoiterGuidanceOutput] = None
+        self.loiter_history: List[Tuple[float, LoiterGuidanceOutput]] = []
+
+        # Tracking metrics for terminal and approach phases
+        self.terminal_entry_time: Optional[float] = None
+        self.terminal_entry_altitude: Optional[float] = None
+        self.terminal_entry_distance: Optional[float] = None
+        self.terminal_entry_glide_range: Optional[float] = None
+        self.final_approach_entry_time: Optional[float] = None
+        self.final_approach_entry_altitude: Optional[float] = None
+        self.final_approach_entry_distance: Optional[float] = None
+
+        self.cumulative_loiter_angle_deg: float = 0.0
+        self._last_loiter_bearing: Optional[float] = None
+
         # --------------------------------------------------
         # Simulation time
         # --------------------------------------------------
@@ -166,6 +228,31 @@ class ParafoilSimulator:
 
         self.state_machine.transition_to(FlightState.DROGUE_DESCENT)
 
+    @property
+    def loiter_orbits_completed(self) -> float:
+        """Total number of full or partial loiter revolutions completed."""
+        return self.cumulative_loiter_angle_deg / 360.0
+
+    @property
+    def max_radial_error_during_loiter(self) -> float:
+        """Maximum absolute radial error observed during terminal loiter guidance."""
+        errs = [
+            abs(s.loiter_radial_error)
+            for s in self.history
+            if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_radial_error is not None
+        ]
+        return max(errs) if errs else 0.0
+
+    @property
+    def mean_radial_error_during_loiter(self) -> float:
+        """Mean absolute radial error observed during terminal loiter guidance."""
+        errs = [
+            abs(s.loiter_radial_error)
+            for s in self.history
+            if s.state == FlightState.TERMINAL_GUIDANCE and s.loiter_radial_error is not None
+        ]
+        return (sum(errs) / len(errs)) if errs else 0.0
+
     # ======================================================
     # Record simulation state
     # ======================================================
@@ -174,6 +261,17 @@ class ParafoilSimulator:
         """
         Store the current state of the simulation.
         """
+        current_state = self.state_machine.get_state()
+        loiter_phase = None
+        loiter_r_dist = None
+        loiter_r_err = None
+        loiter_cmd_hdg = None
+
+        if current_state == FlightState.TERMINAL_GUIDANCE and self.last_loiter_output is not None:
+            loiter_phase = self.last_loiter_output.phase
+            loiter_r_dist = self.last_loiter_output.radial_distance
+            loiter_r_err = self.last_loiter_output.radial_error
+            loiter_cmd_hdg = self.last_loiter_output.desired_heading
 
         self.history.append(
             SimulationSample(
@@ -187,7 +285,11 @@ class ParafoilSimulator:
                 heading=self.state.heading,
                 heading_rate=self.state.heading_rate,
                 steering=steering,
-                state=self.state_machine.get_state(),
+                state=current_state,
+                loiter_phase=loiter_phase,
+                loiter_radial_distance=loiter_r_dist,
+                loiter_radial_error=loiter_r_err,
+                loiter_desired_heading=loiter_cmd_hdg,
             )
         )
 
@@ -259,6 +361,9 @@ class ParafoilSimulator:
                     self.state_machine.transition_to(
                         FlightState.FINAL_APPROACH
                     )
+                    self.final_approach_entry_time = self.time
+                    self.final_approach_entry_altitude = self.state.altitude
+                    self.final_approach_entry_distance = target_distance
 
                 elif should_enter_terminal_guidance(
                     altitude=self.state.altitude,
@@ -271,12 +376,34 @@ class ParafoilSimulator:
                     self.state_machine.transition_to(
                         FlightState.TERMINAL_GUIDANCE
                     )
+                    self.terminal_entry_time = self.time
+                    self.terminal_entry_altitude = self.state.altitude
+                    self.terminal_entry_distance = target_distance
+                    self.terminal_entry_glide_range = (
+                        self.parafoil_config.forward_speed
+                        * self.state.altitude
+                        / self.parafoil_config.descent_rate
+                    )
 
         # --------------------------------------------------
-        # TERMINAL GUIDANCE → FINAL APPROACH
+        # TERMINAL GUIDANCE → FINAL APPROACH / FAILSAFE
         # --------------------------------------------------
 
         elif current_state == FlightState.TERMINAL_GUIDANCE:
+
+            if self.terminal_entry_time is None:
+                self.terminal_entry_time = self.time
+                self.terminal_entry_altitude = self.state.altitude
+                if self.target_position is not None:
+                    self.terminal_entry_distance = distance(
+                        LocalPoint(self.state.x, self.state.y),
+                        self.target_position,
+                    )
+                self.terminal_entry_glide_range = (
+                    self.parafoil_config.forward_speed
+                    * self.state.altitude
+                    / self.parafoil_config.descent_rate
+                )
 
             if self.target_position is not None:
                 target_distance = distance(
@@ -284,12 +411,33 @@ class ParafoilSimulator:
                     self.target_position,
                 )
 
+                # FINAL_APPROACH has priority over other terminal logic
                 if (
                     self.state.altitude <= self.final_approach_altitude
                     and target_distance <= self.final_approach_radius
                 ):
                     self.state_machine.transition_to(
                         FlightState.FINAL_APPROACH
+                    )
+                    self.final_approach_entry_time = self.time
+                    self.final_approach_entry_altitude = self.state.altitude
+                    self.final_approach_entry_distance = target_distance
+
+                # Safety guard: maximum time in terminal guidance exceeded
+                elif (
+                    self.terminal_entry_time is not None
+                    and (self.time - self.terminal_entry_time) >= self.max_terminal_guidance_time
+                ):
+                    self.state_machine.transition_to(
+                        FlightState.FAILSAFE
+                    )
+            else:
+                if (
+                    self.terminal_entry_time is not None
+                    and (self.time - self.terminal_entry_time) >= self.max_terminal_guidance_time
+                ):
+                    self.state_machine.transition_to(
+                        FlightState.FAILSAFE
                     )
 
         # --------------------------------------------------
@@ -355,7 +503,6 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.TERMINAL_GUIDANCE:
 
-            # Safe placeholder behavior: kinematic parafoil update without premature maneuver
             self.model.update_parafoil(steering=steering, dt=self.dt)
 
         # --------------------------------------------------
@@ -416,6 +563,7 @@ class ParafoilSimulator:
             - maximum simulation time is reached
             - CanSat reaches the ground
             - LANDING state is reached
+            - FAILSAFE state is reached
 
         steering_function is only allowed to influence
         the CanSat during precision guidance and final
@@ -440,6 +588,7 @@ class ParafoilSimulator:
             self.time < max_time
             and self.state.altitude > 0.0
             and self.state_machine.get_state() != FlightState.LANDING
+            and self.state_machine.get_state() != FlightState.FAILSAFE
         ):
 
             current_state = self.state_machine.get_state()
@@ -450,11 +599,39 @@ class ParafoilSimulator:
 
             if current_state in {
                 FlightState.PRECISION_GUIDANCE,
-                FlightState.TERMINAL_GUIDANCE,
                 FlightState.FINAL_APPROACH,
             }:
 
                 steering = steering_function(self.time, self.state)
+
+            # --------------------------------------------------
+            # Terminal guidance (autonomous loiter holding orbit)
+            # --------------------------------------------------
+
+            elif current_state == FlightState.TERMINAL_GUIDANCE:
+
+                if self.loiter_guidance is not None:
+                    loiter_out = self.loiter_guidance.update(
+                        position=LocalPoint(self.state.x, self.state.y),
+                        current_heading=self.state.heading,
+                    )
+                    self.last_loiter_output = loiter_out
+                    self.loiter_history.append((self.time, loiter_out))
+                    steering = loiter_out.steering_command
+
+                    # Track orbit angular progression
+                    if self.target_position is not None:
+                        current_pos = LocalPoint(self.state.x, self.state.y)
+                        current_bearing = bearing(self.target_position, current_pos)
+                        if self._last_loiter_bearing is not None:
+                            delta_bearing = (
+                                (current_bearing - self._last_loiter_bearing + 180.0) % 360.0
+                                - 180.0
+                            )
+                            self.cumulative_loiter_angle_deg += abs(delta_bearing)
+                        self._last_loiter_bearing = current_bearing
+                else:
+                    steering = 0.0
 
             # --------------------------------------------------
             # All other phases
