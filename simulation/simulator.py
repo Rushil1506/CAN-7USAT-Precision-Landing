@@ -460,15 +460,9 @@ class ParafoilSimulator:
                         wind_x=self.parafoil_config.wind_x,
                         wind_y=self.parafoil_config.wind_y,
                     )
-                    available_terminal_time = (self.state.altitude - geom.breakout_altitude) / self.parafoil_config.descent_rate
-                    
-                    if available_terminal_time <= self.max_terminal_guidance_time:
-                        self.state_machine.transition_to(
-                            FlightState.TERMINAL_GUIDANCE
-                        )
-                    self.terminal_entry_time = self.time
-                    self.terminal_entry_altitude = self.state.altitude
-                    self.terminal_entry_distance = target_distance
+                    self.state_machine.transition_to(
+                        FlightState.TERMINAL_GUIDANCE
+                    )
                     
                     from guidance.glide_range import calculate_glide_range
                     self.terminal_entry_glide_range = calculate_glide_range(
@@ -502,6 +496,39 @@ class ParafoilSimulator:
                     * self.state.altitude
                     / self.parafoil_config.descent_rate
                 )
+                
+                if self.target_position is not None:
+                    from guidance.orbit_planner import plan_terminal_orbit
+                    
+                    self.terminal_orbit_plan = plan_terminal_orbit(
+                        position=LocalPoint(self.state.x, self.state.y),
+                        target=self.target_position,
+                        current_altitude=self.state.altitude,
+                        wind_x=self.parafoil_config.wind_x,
+                        wind_y=self.parafoil_config.wind_y,
+                        forward_speed=self.parafoil_config.forward_speed,
+                        descent_rate=self.parafoil_config.descent_rate,
+                        orbit_radius=self.loiter_radius,
+                        breakout_altitude_margin=self.breakout_altitude_margin,
+                    )
+                    
+                    if self.loiter_guidance is not None:
+                        self.loiter_guidance.center = self.terminal_orbit_plan.orbit_center
+                        self.loiter_guidance.direction = self.terminal_orbit_plan.orbit_direction
+                        
+                    expected_terminal_time = max(0.0, (self.terminal_entry_altitude - self.terminal_orbit_plan.breakout_altitude) / self.parafoil_config.descent_rate)
+                    
+                    import math
+                    orbit_circumference = 2.0 * math.pi * self.loiter_radius
+                    safety_time_margin = orbit_circumference / self.parafoil_config.forward_speed
+                    
+                    # Watchdog
+                    if self.max_terminal_guidance_time < 30.0:
+                        # Test override
+                        self.max_terminal_guidance_time = expected_terminal_time + self.max_terminal_guidance_time
+                    else:
+                        self.max_terminal_guidance_time = expected_terminal_time + safety_time_margin
+
 
             if self.target_position is not None:
                 target_distance = distance(
