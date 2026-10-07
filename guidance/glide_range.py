@@ -39,6 +39,8 @@ def calculate_time_to_ground(altitude: float, descent_rate: float) -> float:
         raise ValueError("descent_rate must be greater than zero")
     return altitude / descent_rate
 
+from guidance.integration_utils import integrate_altitude_scalar, evaluate_interval_feasibility
+
 def _integrate_glide_range(
     altitude: float,
     descent_rate: float,
@@ -48,51 +50,25 @@ def _integrate_glide_range(
 ) -> tuple[float, bool]:
     """
     Numerically integrate the wind-aware glide range over altitude.
-    Uses Trapezoidal rule.
+    Uses reusable altitude integration utilities.
     Returns (integrated_range, feasible).
     """
-    dh = 1.0 # 1 meter integration step
-    
     if altitude < 1e-3:
         return 0.0, True
         
-    num_steps = int(math.ceil(altitude / dh))
-    actual_dh = altitude / num_steps
+    feasibility = evaluate_interval_feasibility(wind_field, 0.0, altitude, desired_course_deg, horizontal_speed, dh=1.0)
     
-    integrated_range = 0.0
-    
-    # Evaluate at h_0
-    h_prev = altitude
-    wx_prev, wy_prev = wind_field.wind_at_altitude(h_prev)
-    comp_prev = calculate_wind_corrected_heading(desired_course_deg, horizontal_speed, wx_prev, wy_prev)
-    
-    if not comp_prev.feasible or comp_prev.ground_speed_along_track <= 0:
+    if not feasibility.feasible:
         return 0.0, False
         
-    v_prev = comp_prev.ground_speed_along_track
+    def vg_func(h: float) -> float:
+        wx, wy = wind_field.wind_at_altitude(h)
+        comp = calculate_wind_corrected_heading(desired_course_deg, horizontal_speed, wx, wy)
+        return comp.ground_speed_along_track
+        
+    integral = integrate_altitude_scalar(vg_func, 0.0, altitude, dh=1.0)
+    integrated_range = integral / descent_rate
     
-    for i in range(1, num_steps + 1):
-        h_curr = altitude - i * actual_dh
-        if h_curr < 0:
-            h_curr = 0.0
-            
-        wx_curr, wy_curr = wind_field.wind_at_altitude(h_curr)
-        comp_curr = calculate_wind_corrected_heading(desired_course_deg, horizontal_speed, wx_curr, wy_curr)
-        
-        if not comp_curr.feasible or comp_curr.ground_speed_along_track <= 0:
-            return 0.0, False
-            
-        v_curr = comp_curr.ground_speed_along_track
-        
-        # Trapezoidal step
-        # dz = actual_dh
-        # dt = dz / descent_rate
-        # dx = 0.5 * (v_prev + v_curr) * dt
-        dt = actual_dh / descent_rate
-        integrated_range += 0.5 * (v_prev + v_curr) * dt
-        
-        v_prev = v_curr
-        
     return integrated_range, True
 
 def calculate_glide_range(
