@@ -5,7 +5,7 @@ from navigation.bearing import bearing
 from navigation.coordinates import LocalPoint
 from navigation.heading import heading_error
 from navigation.waypoint_manager import WaypointManager
-
+from guidance.wind_compensation import calculate_wind_corrected_heading
 
 @dataclass(frozen=True)
 class GuidanceOutput:
@@ -19,6 +19,14 @@ class GuidanceOutput:
     waypoint_reached: bool
     target_reached: bool
     final_approach: bool
+    
+    # Wind compensation telemetry
+    desired_heading: float = 0.0
+    crab_angle: float = 0.0
+    crosswind_component: float = 0.0
+    along_track_wind: float = 0.0
+    ground_speed_along_track: float = 0.0
+    wind_feasible: bool = True
 
 
 class GuidanceController:
@@ -54,6 +62,7 @@ class GuidanceController:
         pid: PIDController,
         final_approach_altitude: float = 120.0,
         final_approach_radius: float = 100.0,
+        airspeed: float = 8.0,
     ) -> None:
         if final_approach_altitude < 0.0:
             raise ValueError("final_approach_altitude cannot be negative")
@@ -64,6 +73,14 @@ class GuidanceController:
         self.pid = pid
         self.final_approach_altitude = final_approach_altitude
         self.final_approach_radius = final_approach_radius
+        self.airspeed = airspeed
+        self.estimated_wind_x = 0.0
+        self.estimated_wind_y = 0.0
+
+    def set_wind(self, wind_x: float, wind_y: float) -> None:
+        """Inject wind estimates for navigation compensation."""
+        self.estimated_wind_x = wind_x
+        self.estimated_wind_y = wind_y
 
     def reset(self) -> None:
         """Reset both waypoint navigation and PID memory."""
@@ -102,8 +119,17 @@ class GuidanceController:
             # terminal landing phase.
             waypoint = self.waypoint_manager.target
             target_distance = _distance_xy(position, waypoint)
-            desired_bearing = bearing(position, waypoint)
-            error = heading_error(heading, desired_bearing)
+            desired_course = bearing(position, waypoint)
+            
+            wind_comp = calculate_wind_corrected_heading(
+                desired_course_deg=desired_course,
+                airspeed=self.airspeed,
+                wind_x=self.estimated_wind_x,
+                wind_y=self.estimated_wind_y,
+            )
+            desired_heading = wind_comp.heading_deg
+            
+            error = heading_error(heading, desired_heading)
             steering = self.pid.update(error=error, dt=dt)
 
             final_approach = (
@@ -113,13 +139,19 @@ class GuidanceController:
 
             return GuidanceOutput(
                 steering=steering,
-                desired_bearing=desired_bearing,
+                desired_bearing=desired_course,
                 heading_error=error,
                 distance_to_waypoint=target_distance,
                 waypoint_number=self.waypoint_manager.total_waypoints,
                 waypoint_reached=waypoint_reached,
                 target_reached=True,
                 final_approach=final_approach,
+                desired_heading=desired_heading,
+                crab_angle=wind_comp.crab_angle_deg,
+                crosswind_component=wind_comp.crosswind_component,
+                along_track_wind=wind_comp.along_track_wind,
+                ground_speed_along_track=wind_comp.ground_speed_along_track,
+                wind_feasible=wind_comp.feasible,
             )
 
         # A waypoint switch creates a new control objective, so clear the
@@ -129,8 +161,17 @@ class GuidanceController:
             self.pid.reset()
 
         waypoint = self.waypoint_manager.current_waypoint
-        desired_bearing = bearing(position, waypoint)
-        error = heading_error(heading, desired_bearing)
+        desired_course = bearing(position, waypoint)
+        
+        wind_comp = calculate_wind_corrected_heading(
+            desired_course_deg=desired_course,
+            airspeed=self.airspeed,
+            wind_x=self.estimated_wind_x,
+            wind_y=self.estimated_wind_y,
+        )
+        desired_heading = wind_comp.heading_deg
+        
+        error = heading_error(heading, desired_heading)
         steering = self.pid.update(error=error, dt=dt)
 
         target = self.waypoint_manager.target
@@ -143,13 +184,19 @@ class GuidanceController:
 
         return GuidanceOutput(
             steering=steering,
-            desired_bearing=desired_bearing,
+            desired_bearing=desired_course,
             heading_error=error,
             distance_to_waypoint=_distance_xy(position, waypoint),
             waypoint_number=self.waypoint_manager.waypoint_number,
             waypoint_reached=waypoint_reached,
             target_reached=False,
             final_approach=final_approach,
+            desired_heading=desired_heading,
+            crab_angle=wind_comp.crab_angle_deg,
+            crosswind_component=wind_comp.crosswind_component,
+            along_track_wind=wind_comp.along_track_wind,
+            ground_speed_along_track=wind_comp.ground_speed_along_track,
+            wind_feasible=wind_comp.feasible,
         )
 
 

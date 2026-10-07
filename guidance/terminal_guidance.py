@@ -59,56 +59,12 @@ def evaluate_terminal_guidance(
     target_distance: float,
     terminal_margin: float = 0.0,
     terminal_capture_radius: Optional[float] = None,
+    wind_x: float = 0.0,
+    wind_y: float = 0.0,
+    desired_course_deg: float = 90.0,
 ) -> TerminalDecision:
     """
     Evaluate whether direct guidance should continue or terminal guidance should begin.
-
-    Kinematic decision relationship:
-        Rg = horizontal_speed * (altitude / descent_rate)
-
-        Energy condition:
-            Rg >= Dt + M
-
-        Spatial condition:
-            Dt <= R_capture   (if R_capture is provided)
-
-        Combined terminal-entry rule:
-            should_enter_terminal = (Dt <= R_capture) AND (Rg >= Dt + M)
-
-            True  -> TERMINAL_GUIDANCE
-            False -> DIRECT_GUIDANCE
-
-    where:
-        Rg        = Remaining estimated glide range [m]
-        Dt        = Remaining horizontal distance to target [m]
-        M         = Configurable terminal margin [m]
-        R_capture = Configurable terminal capture radius [m]
-
-    Boundary behavior:
-        When Dt == R_capture and Rg == Dt + M exactly, both conditions evaluate
-        to True, selecting TERMINAL_GUIDANCE.
-
-    Assumptions and Limitations:
-        - Reuses the simplified kinematic glide range model from guidance/glide_range.py.
-        - Uses air-relative forward speed and assumes zero wind.
-        - Does NOT yet alter flight state machine or actuator outputs.
-
-    Args:
-        altitude: Current altitude above ground [m] (must be >= 0).
-        horizontal_speed: Air-relative forward speed [m/s] (must be >= 0).
-        descent_rate: Vertical descent rate [m/s] (must be > 0).
-        target_distance: Horizontal distance to landing target [m] (must be >= 0).
-        terminal_margin: Configurable margin buffer [m] (must be >= 0, default 0.0).
-        terminal_capture_radius: Configurable spatial capture radius [m]
-            (must be > 0 if provided, default None).
-
-    Returns:
-        TerminalDecision dataclass containing mode, flags, and range metrics.
-
-    Raises:
-        ValueError: If altitude < 0, horizontal_speed < 0, descent_rate <= 0,
-            target_distance < 0, terminal_margin < 0, or
-            terminal_capture_radius <= 0.
     """
     if altitude < 0.0:
         raise ValueError("altitude cannot be negative")
@@ -127,6 +83,9 @@ def evaluate_terminal_guidance(
         altitude=altitude,
         descent_rate=descent_rate,
         horizontal_speed=horizontal_speed,
+        wind_x=wind_x,
+        wind_y=wind_y,
+        desired_course_deg=desired_course_deg,
     )
     threshold = target_distance + terminal_margin
     excess = rg - threshold
@@ -158,7 +117,6 @@ def evaluate_terminal_guidance(
         energy_condition=energy_condition,
     )
 
-
 def should_enter_terminal_guidance(
     altitude: float,
     horizontal_speed: float,
@@ -166,13 +124,12 @@ def should_enter_terminal_guidance(
     target_distance: float,
     terminal_margin: float = 0.0,
     terminal_capture_radius: Optional[float] = None,
+    wind_x: float = 0.0,
+    wind_y: float = 0.0,
+    desired_course_deg: float = 90.0,
 ) -> bool:
     """
     Boolean helper for terminal guidance decision.
-
-    Returns:
-        True if spatial condition (Dt <= R_capture or R_capture is None) AND
-        energy condition (Rg >= Dt + M) are both satisfied, False otherwise.
     """
     decision = evaluate_terminal_guidance(
         altitude=altitude,
@@ -181,9 +138,11 @@ def should_enter_terminal_guidance(
         target_distance=target_distance,
         terminal_margin=terminal_margin,
         terminal_capture_radius=terminal_capture_radius,
+        wind_x=wind_x,
+        wind_y=wind_y,
+        desired_course_deg=desired_course_deg,
     )
     return decision.should_enter_terminal
-
 
 def evaluate_terminal_guidance_from_config(
     altitude: float,
@@ -191,20 +150,12 @@ def evaluate_terminal_guidance_from_config(
     config: ParafoilConfig,
     terminal_margin: float = 0.0,
     terminal_capture_radius: Optional[float] = None,
+    wind_x: float = 0.0,
+    wind_y: float = 0.0,
+    desired_course_deg: float = 90.0,
 ) -> TerminalDecision:
     """
     Convenience wrapper that extracts parameters from a ParafoilConfig instance.
-
-    Args:
-        altitude: Altitude above ground [m] (must be >= 0).
-        target_distance: Distance to landing target [m] (must be >= 0).
-        config: ParafoilConfig instance providing forward_speed and descent_rate.
-        terminal_margin: Configurable margin buffer [m] (must be >= 0, default 0.0).
-        terminal_capture_radius: Configurable spatial capture radius [m]
-            (must be > 0 if provided, default None).
-
-    Returns:
-        TerminalDecision dataclass.
     """
     return evaluate_terminal_guidance(
         altitude=altitude,
@@ -213,4 +164,7 @@ def evaluate_terminal_guidance_from_config(
         target_distance=target_distance,
         terminal_margin=terminal_margin,
         terminal_capture_radius=terminal_capture_radius,
+        wind_x=wind_x,
+        wind_y=wind_y,
+        desired_course_deg=desired_course_deg,
     )

@@ -66,6 +66,9 @@ def run_mission_with_wind(wind_x: float, wind_y: float):
     )
 
     def steering_cb(time, st):
+        # Inject known wind values into the controller for this milestone
+        guidance.set_wind(wind_x, wind_y)
+        
         if sim.state_machine.get_state() == FlightState.FINAL_APPROACH:
             if not waypoint_manager.is_complete:
                 waypoint_manager.skip_to_final_target()

@@ -130,3 +130,54 @@ def test_estimate_from_config():
     assert isinstance(result, GlideRangeEstimate)
     assert math.isclose(result.time_to_ground, 240.0)
     assert math.isclose(result.glide_range, 1920.0)
+
+def test_pure_tailwind():
+    # Test B: Pure 3 m/s tailwind along East course
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=3.0, wind_y=0.0, desired_course_deg=90.0)
+    assert result.feasible is True
+    assert math.isclose(result.projected_ground_speed, 11.0)
+    assert math.isclose(result.glide_range, 2640.0)
+
+def test_pure_headwind():
+    # Test C: Pure 3 m/s headwind along East course
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=-3.0, wind_y=0.0, desired_course_deg=90.0)
+    assert result.feasible is True
+    assert math.isclose(result.projected_ground_speed, 5.0)
+    assert math.isclose(result.glide_range, 1200.0)
+
+def test_crosswind():
+    # Test D: 4 m/s crosswind with 8 m/s airspeed
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=0.0, wind_y=4.0, desired_course_deg=90.0)
+    assert result.feasible is True
+    # crab = 30 deg -> cos(30) = sqrt(3)/2 ~= 0.866
+    expected_speed = 8.0 * math.cos(math.radians(30.0))
+    assert math.isclose(result.projected_ground_speed, expected_speed, abs_tol=1e-5)
+    assert math.isclose(result.glide_range, expected_speed * (600.0/2.5), abs_tol=1e-5)
+
+def test_critical_crosswind():
+    # Test E: Critical crosswind
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=0.0, wind_y=8.0, desired_course_deg=90.0)
+    assert result.feasible is True
+    assert math.isclose(result.projected_ground_speed, 0.0, abs_tol=1e-5)
+    assert math.isclose(result.glide_range, 0.0, abs_tol=1e-5)
+
+def test_infeasible_crosswind():
+    # Test F: Infeasible crosswind
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=0.0, wind_y=10.0, desired_course_deg=90.0)
+    assert result.feasible is False
+    assert math.isclose(result.glide_range, 0.0)
+
+def test_strong_headwind():
+    # Test G: Strong headwind
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=-9.0, wind_y=0.0, desired_course_deg=90.0)
+    assert result.feasible is False
+    assert result.projected_ground_speed < 0.0
+    assert math.isclose(result.glide_range, 0.0)
+
+def test_diagonal_wind():
+    # Test H: Diagonal wind
+    # non-cardinal course 45 deg, tailwind (2, 2)
+    result = estimate_glide_range(altitude=600.0, descent_rate=2.5, horizontal_speed=8.0, wind_x=2.0, wind_y=2.0, desired_course_deg=45.0)
+    assert result.feasible is True
+    assert math.isclose(result.projected_ground_speed, 8.0 + math.hypot(2.0, 2.0))
+

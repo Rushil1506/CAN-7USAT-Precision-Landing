@@ -330,3 +330,32 @@ def test_invalid_capture_radius_raises():
 
     with pytest.raises(ValueError, match="terminal_capture_radius must be greater than zero"):
         evaluate_terminal_guidance(600.0, 8.0, 2.5, 100.0, 50.0, terminal_capture_radius=-50.0)
+
+def test_wind_aware_terminal_decision():
+    # 600m altitude, 2.5 descent, 8.0 airspeed -> 240s
+    # Headwind -3 m/s -> V_ground = 5.0 -> Glide range = 1200m
+    # Let Dt = 1500m. Rg (1200) < Dt (1500), so should be False
+    decision1 = evaluate_terminal_guidance(600.0, 8.0, 2.5, 1500.0, wind_x=-3.0, wind_y=0.0, desired_course_deg=90.0)
+    assert decision1.should_enter_terminal is False
+    assert decision1.energy_condition is False
+    
+    # Tailwind +3 m/s -> V_ground = 11.0 -> Glide range = 2640m
+    # Let Dt = 2000m. Rg (2640) >= Dt (2000), so should be True (assuming no capture radius)
+    decision2 = evaluate_terminal_guidance(600.0, 8.0, 2.5, 2000.0, wind_x=3.0, wind_y=0.0, desired_course_deg=90.0)
+    assert decision2.should_enter_terminal is True
+    assert decision2.energy_condition is True
+    
+    # Test I: Terminal decision regression
+    # Rg = 1920m (no wind). Dt = 1920m.
+    # Should be inclusive.
+    decision3 = evaluate_terminal_guidance(600.0, 8.0, 2.5, 1920.0, wind_x=0.0, wind_y=0.0, desired_course_deg=90.0)
+    assert decision3.should_enter_terminal is True
+    
+    # Test J: Terminal capture regression
+    # Rg = 2640m (Tailwind). Dt = 2000m. Capture radius = 1000m.
+    # Dt > capture_radius -> False
+    decision4 = evaluate_terminal_guidance(600.0, 8.0, 2.5, 2000.0, terminal_capture_radius=1000.0, wind_x=3.0, wind_y=0.0, desired_course_deg=90.0)
+    assert decision4.should_enter_terminal is False
+    assert decision4.spatial_capture is False
+    assert decision4.energy_condition is True
+

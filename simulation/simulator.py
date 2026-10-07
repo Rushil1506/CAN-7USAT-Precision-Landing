@@ -441,6 +441,12 @@ class ParafoilSimulator:
                     target_distance=target_distance,
                     terminal_margin=self.terminal_margin,
                     terminal_capture_radius=self.terminal_capture_radius,
+                    wind_x=self.parafoil_config.wind_x,
+                    wind_y=self.parafoil_config.wind_y,
+                    desired_course_deg=bearing(
+                        LocalPoint(self.state.x, self.state.y),
+                        self.target_position
+                    ),
                 ):
                     self.state_machine.transition_to(
                         FlightState.TERMINAL_GUIDANCE
@@ -448,10 +454,18 @@ class ParafoilSimulator:
                     self.terminal_entry_time = self.time
                     self.terminal_entry_altitude = self.state.altitude
                     self.terminal_entry_distance = target_distance
-                    self.terminal_entry_glide_range = (
-                        self.parafoil_config.forward_speed
-                        * self.state.altitude
-                        / self.parafoil_config.descent_rate
+                    
+                    from guidance.glide_range import calculate_glide_range
+                    self.terminal_entry_glide_range = calculate_glide_range(
+                        altitude=self.state.altitude,
+                        descent_rate=self.parafoil_config.descent_rate,
+                        horizontal_speed=self.parafoil_config.forward_speed,
+                        wind_x=self.parafoil_config.wind_x,
+                        wind_y=self.parafoil_config.wind_y,
+                        desired_course_deg=bearing(
+                            LocalPoint(self.state.x, self.state.y),
+                            self.target_position
+                        )
                     )
 
         # --------------------------------------------------
