@@ -6,6 +6,7 @@ from flight.state_machine import FlightState
 from navigation.coordinates import LocalPoint
 from guidance.loiter_guidance import LoiterDirection, LoiterGuidance, LoiterPhase
 from simulation.simulator import ParafoilSimulator
+from environment.wind import ConstantWindField
 
 
 def create_simulator(altitude=1000.0):
@@ -859,6 +860,7 @@ def test_simulator_telemetry_headwind():
     sim = create_simulator()
     sim.state.heading = 0.0
     sim.parafoil_config.wind_y = -3.0
+    sim.wind_field = ConstantWindField(0.0, -3.0)
     sim.state_machine.state = FlightState.PRECISION_GUIDANCE
     sim.step()
     s = sim.history[-1]
@@ -871,6 +873,7 @@ def test_simulator_telemetry_tailwind():
     sim = create_simulator()
     sim.state.heading = 0.0
     sim.parafoil_config.wind_y = 3.0
+    sim.wind_field = ConstantWindField(0.0, 3.0)
     sim.state_machine.state = FlightState.PRECISION_GUIDANCE
     sim.step()
     s = sim.history[-1]
@@ -883,6 +886,7 @@ def test_simulator_telemetry_crosswind():
     sim = create_simulator()
     sim.state.heading = 0.0
     sim.parafoil_config.wind_x = 6.0
+    sim.wind_field = ConstantWindField(6.0, 0.0)
     sim.state_machine.state = FlightState.PRECISION_GUIDANCE
     sim.step()
     s = sim.history[-1]
@@ -895,8 +899,7 @@ def test_simulator_telemetry_crosswind():
 def test_simulator_telemetry_diagonal_wind():
     sim = create_simulator()
     sim.state.heading = 45.0
-    sim.parafoil_config.wind_x = 2.0
-    sim.parafoil_config.wind_y = -2.0
+    sim.wind_field = ConstantWindField(2.0, -2.0)
     sim.state_machine.state = FlightState.PRECISION_GUIDANCE
     sim.step()
     s = sim.history[-1]
@@ -907,8 +910,7 @@ def test_simulator_telemetry_diagonal_wind():
 
 def test_simulator_drogue_wind_drift():
     sim = create_simulator()
-    sim.parafoil_config.wind_x = 5.0
-    sim.parafoil_config.wind_y = -5.0
+    sim.wind_field = ConstantWindField(5.0, -5.0)
     sim.state_machine.state = FlightState.DROGUE_DESCENT
     sim.step()
     s = sim.history[-1]
@@ -921,8 +923,7 @@ def test_simulator_crab_angle_wrap():
     sim = create_simulator()
     sim.state.heading = 350.0
     sim.state_machine.state = FlightState.DROGUE_DESCENT
-    sim.parafoil_config.wind_x = math.sin(math.radians(10.0))
-    sim.parafoil_config.wind_y = math.cos(math.radians(10.0))
+    sim.wind_field = ConstantWindField(math.sin(math.radians(10.0)), math.cos(math.radians(10.0)))
     sim.step()
     s = sim.history[-1]
     assert math.isclose(s.course_over_ground, 10.0)
@@ -931,9 +932,36 @@ def test_simulator_crab_angle_wrap():
     sim2 = create_simulator()
     sim2.state.heading = 10.0
     sim2.state_machine.state = FlightState.DROGUE_DESCENT
-    sim2.parafoil_config.wind_x = math.sin(math.radians(350.0))
-    sim2.parafoil_config.wind_y = math.cos(math.radians(350.0))
+    sim2.wind_field = ConstantWindField(math.sin(math.radians(350.0)), math.cos(math.radians(350.0)))
     sim2.step()
     s2 = sim2.history[-1]
     assert math.isclose(s2.course_over_ground, 350.0)
     assert math.isclose(s2.crab_angle, -20.0)
+
+from environment.wind import PiecewiseWindField
+
+def test_simulator_piecewise_wind_telemetry():
+    sim = create_simulator(altitude=1000.0)
+    sim.wind_field = PiecewiseWindField([
+        (0.0, (1.0, 0.0)),
+        (1000.0, (5.0, 0.0))
+    ])
+    
+    # Run the simulation for a few steps to let altitude drop
+    for _ in range(100): # 10 seconds, altitude should drop by ~25m (drogue descent is 17m/s)
+        sim.step()
+        
+    s_initial = sim.history[0]
+    s_final = sim.history[-1]
+    
+    assert math.isclose(s_initial.wind_x, 5.0, abs_tol=0.01) # Near 1000m
+    
+    # Altitude dropped, so wind_x should be < 5.0
+    assert s_final.altitude < 990.0
+    assert s_final.wind_x < 5.0
+    
+    # Check that the wind mathematically interpolates
+    # wind_x was evaluated at the start of the timestep (before the 1.7m altitude drop)
+    alt_at_start_of_step = s_final.altitude + 1.7
+    expected_wind_x = 1.0 + (5.0 - 1.0) * (alt_at_start_of_step - 0.0) / (1000.0 - 0.0)
+    assert math.isclose(s_final.wind_x, expected_wind_x, abs_tol=1e-4)

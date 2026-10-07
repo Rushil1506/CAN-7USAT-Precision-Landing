@@ -30,6 +30,8 @@ from flight.state_machine import (
     FlightStateMachine,
 )
 
+from environment.wind import WindField, ConstantWindField
+
 
 @dataclass
 class SimulationSample:
@@ -56,6 +58,8 @@ class SimulationSample:
     state: FlightState
 
     # Telemetry
+    wind_x: float
+    wind_y: float
     ground_speed: float
     course_over_ground: float
     crab_angle: float
@@ -115,6 +119,7 @@ class ParafoilSimulator:
         breakout_altitude_margin: float = 2.0,
         wind_x: float = 0.0,
         wind_y: float = 0.0,
+        wind_field: Optional[WindField] = None,
     ):
 
         # --------------------------------------------------
@@ -161,9 +166,16 @@ class ParafoilSimulator:
         self.state = state
         self.parafoil_config = parafoil_config
         
+        if wind_field is not None:
+            self.wind_field = wind_field
+        else:
+            self.wind_field = ConstantWindField(wind_x, wind_y)
+            
         # Override config wind fields for convenience as required by single source of truth rule
-        self.parafoil_config.wind_x = wind_x
-        self.parafoil_config.wind_y = wind_y
+        # Use initial altitude wind
+        initial_wx, initial_wy = self.wind_field.wind_at_altitude(self.state.altitude)
+        self.parafoil_config.wind_x = initial_wx
+        self.parafoil_config.wind_y = initial_wy
 
         self.model = ParafoilModel(
             state=state,
@@ -350,6 +362,8 @@ class ParafoilSimulator:
                 heading_rate=self.state.heading_rate,
                 steering=steering,
                 state=current_state,
+                wind_x=self.parafoil_config.wind_x,
+                wind_y=self.parafoil_config.wind_y,
                 ground_speed=gs,
                 course_over_ground=cog,
                 crab_angle=crab,
@@ -615,6 +629,11 @@ class ParafoilSimulator:
         """
         Advance the simulation by one timestep.
         """
+        
+        # Update current environment wind based on altitude
+        current_wx, current_wy = self.wind_field.wind_at_altitude(self.state.altitude)
+        self.parafoil_config.wind_x = current_wx
+        self.parafoil_config.wind_y = current_wy
 
         current_state = self.state_machine.get_state()
 
