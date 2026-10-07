@@ -1,0 +1,20 @@
+    )
+
+def estimate_glide_range_from_config(
+    altitude: float,
+    config: ParafoilConfig,
+    wind_x: float = 0.0,
+    wind_y: float = 0.0,
+    desired_course_deg: float = 90.0,
+) -> GlideRangeEstimate:
+    """
+    Estimate glide range using parameters from a ParafoilConfig instance.
+    """
+    return estimate_glide_range(
+        altitude=altitude,
+        descent_rate=config.descent_rate,
+        horizontal_speed=config.forward_speed,
+        wind_x=wind_x,
+        wind_y=wind_y,
+        desired_course_deg=desired_course_deg,
+    )

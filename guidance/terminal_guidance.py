@@ -62,6 +62,7 @@ def evaluate_terminal_guidance(
     wind_x: float = 0.0,
     wind_y: float = 0.0,
     desired_course_deg: float = 90.0,
+    wind_field: Optional['WindField'] = None,
 ) -> TerminalDecision:
     """
     Evaluate whether direct guidance should continue or terminal guidance should begin.
@@ -86,6 +87,7 @@ def evaluate_terminal_guidance(
         wind_x=wind_x,
         wind_y=wind_y,
         desired_course_deg=desired_course_deg,
+        wind_field=wind_field,
     )
     threshold = target_distance + terminal_margin
     excess = rg - threshold
@@ -127,6 +129,7 @@ def should_enter_terminal_guidance(
     wind_x: float = 0.0,
     wind_y: float = 0.0,
     desired_course_deg: float = 90.0,
+    wind_field: Optional['WindField'] = None,
 ) -> bool:
     """
     Boolean helper for terminal guidance decision.
@@ -141,6 +144,7 @@ def should_enter_terminal_guidance(
         wind_x=wind_x,
         wind_y=wind_y,
         desired_course_deg=desired_course_deg,
+        wind_field=wind_field,
     )
     return decision.should_enter_terminal
 

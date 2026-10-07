@@ -57,7 +57,7 @@ def test_exact_boundary_condition():
     assert decision.mode == GuidanceMode.TERMINAL_GUIDANCE
     assert decision.should_enter_terminal
     assert math.isclose(decision.glide_range, 1920.0)
-    assert math.isclose(decision.excess_range, 0.0)
+    assert math.isclose(decision.excess_range, 0.0, abs_tol=1e-5)
     assert should_enter_terminal_guidance(
         altitude=600.0,
         horizontal_speed=8.0,

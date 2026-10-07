@@ -461,6 +461,7 @@ class ParafoilSimulator:
                         LocalPoint(self.state.x, self.state.y),
                         self.target_position
                     ),
+                    wind_field=self.wind_field,
                 ):
                     pos = LocalPoint(self.state.x, self.state.y)
                     geom = calculate_breakout_geometry(

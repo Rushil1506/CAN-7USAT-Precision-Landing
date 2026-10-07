@@ -181,3 +181,32 @@ def test_diagonal_wind():
     assert result.feasible is True
     assert math.isclose(result.projected_ground_speed, 8.0 + math.hypot(2.0, 2.0))
 
+
+# --- Phase 4.1d Shear Tests ---
+from environment.wind import PiecewiseWindField
+
+def test_shear_varying_along_track():
+    wind = PiecewiseWindField([
+        (0.0, (10.0, 0.0)),
+        (500.0, (0.0, 0.0)),
+        (1000.0, (-10.0, 0.0))
+    ])
+    
+    res = estimate_glide_range(altitude=1000.0, descent_rate=2.5, horizontal_speed=8.0, desired_course_deg=90.0, wind_field=wind)
+    assert not res.feasible
+    assert res.glide_range == 0.0
+    
+    res2 = estimate_glide_range(altitude=400.0, descent_rate=2.5, horizontal_speed=8.0, desired_course_deg=90.0, wind_field=wind)
+    assert res2.feasible
+    assert math.isclose(res2.glide_range, 2240.0, abs_tol=1.0)
+    assert math.isclose(res2.projected_ground_speed, 14.0, abs_tol=0.01)
+
+def test_shear_infeasible_crosswind():
+    wind = PiecewiseWindField([
+        (0.0, (0.0, 0.0)),
+        (100.0, (0.0, 10.0))
+    ])
+    res = estimate_glide_range(altitude=100.0, descent_rate=2.5, horizontal_speed=8.0, desired_course_deg=90.0, wind_field=wind)
+    assert not res.feasible
+    assert res.glide_range == 0.0
+
