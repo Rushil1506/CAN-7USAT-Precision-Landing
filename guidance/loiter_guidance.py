@@ -135,6 +135,8 @@ def calculate_tangent_heading(
     return tangent
 
 
+from .wind_compensation import calculate_wind_corrected_heading
+
 class LoiterGuidance:
     """
     Dedicated guidance component for circular holding orbits.
@@ -187,6 +189,13 @@ class LoiterGuidance:
         self.nominal_turn_rate = calculate_nominal_turn_rate(
             forward_speed=forward_speed, loiter_radius=loiter_radius
         )
+        self.estimated_wind_x = 0.0
+        self.estimated_wind_y = 0.0
+
+    def set_wind(self, wind_x: float, wind_y: float) -> None:
+        """Inject wind estimates for orbit compensation."""
+        self.estimated_wind_x = wind_x
+        self.estimated_wind_y = wind_y
 
     def update(
         self,
@@ -226,9 +235,17 @@ class LoiterGuidance:
             correction_deg = max(-30.0, min(30.0, correction_deg))
 
             if self.direction == LoiterDirection.CLOCKWISE:
-                desired_heading = (pure_tangent + correction_deg) % 360.0
+                desired_ground_course = (pure_tangent + correction_deg) % 360.0
             else:
-                desired_heading = (pure_tangent - correction_deg) % 360.0
+                desired_ground_course = (pure_tangent - correction_deg) % 360.0
+
+            wind_comp = calculate_wind_corrected_heading(
+                desired_course_deg=desired_ground_course,
+                airspeed=self.forward_speed,
+                wind_x=self.estimated_wind_x,
+                wind_y=self.estimated_wind_y,
+            )
+            desired_heading = wind_comp.heading_deg
 
             # Nominal steady orbital feedforward command
             feedforward_steering = dir_sign * (
@@ -249,23 +266,32 @@ class LoiterGuidance:
                 alpha_deg = math.degrees(math.asin(ratio))
 
                 if self.direction == LoiterDirection.CLOCKWISE:
-                    desired_heading = (theta_to_center - alpha_deg) % 360.0
+                    desired_ground_course = (theta_to_center - alpha_deg) % 360.0
                 else:
-                    desired_heading = (theta_to_center + alpha_deg) % 360.0
+                    desired_ground_course = (theta_to_center + alpha_deg) % 360.0
 
             else:
                 # Inside the orbit: expand outward toward orbit radius
                 if radial_distance < 1e-6:
-                    desired_heading = current_heading % 360.0
+                    desired_ground_course = current_heading % 360.0
                 else:
                     radial_bearing = bearing(self.center, position)
                     ratio = min(1.0, radial_distance / self.loiter_radius)
                     beta_deg = math.degrees(math.acos(ratio))
 
                     if self.direction == LoiterDirection.CLOCKWISE:
-                        desired_heading = (radial_bearing + 90.0 - beta_deg) % 360.0
+                        desired_ground_course = (radial_bearing + 90.0 - beta_deg) % 360.0
                     else:
-                        desired_heading = (radial_bearing - 90.0 + beta_deg) % 360.0
+                        desired_ground_course = (radial_bearing - 90.0 + beta_deg) % 360.0
+
+            wind_comp = calculate_wind_corrected_heading(
+                desired_course_deg=desired_ground_course,
+                airspeed=self.forward_speed,
+                wind_x=self.estimated_wind_x,
+                wind_y=self.estimated_wind_y,
+            )
+            desired_heading = wind_comp.heading_deg
+
 
             err = heading_error(current_heading, desired_heading)
             # In capture mode, steer toward target heading without pure feedforward

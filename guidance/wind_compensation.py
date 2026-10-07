@@ -37,6 +37,16 @@ def calculate_wind_corrected_heading(
     
     # u_d = [sin(chi), cos(chi)]
     w_parallel = wind_x * math.sin(chi_rad) + wind_y * math.cos(chi_rad)
+
+    if airspeed < 1e-6:
+        return WindCompensationResult(
+            heading_deg=desired_course_deg,
+            crab_angle_deg=0.0,
+            crosswind_component=w_perp,
+            along_track_wind=w_parallel,
+            ground_speed_along_track=0.0,
+            feasible=False
+        )
     
     # Feasibility check
     # We use a small epsilon for floating point tolerance at the boundary
@@ -44,7 +54,7 @@ def calculate_wind_corrected_heading(
     
     if feasible:
         # Clamp mathematically to handle floating point epsilon at boundaries
-        ratio = 0.0 if airspeed == 0.0 else max(-1.0, min(1.0, -w_perp / airspeed))
+        ratio = max(-1.0, min(1.0, -w_perp / airspeed))
         delta_rad = math.asin(ratio)
         delta_deg = math.degrees(delta_rad)
         heading_deg = (desired_course_deg + delta_deg) % 360.0

@@ -7,6 +7,7 @@ from navigation.bearing import bearing
 from navigation.coordinates import LocalPoint
 from navigation.distance import distance
 from navigation.heading import heading_error
+from guidance.wind_compensation import calculate_wind_corrected_heading
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class BreakoutGeometry:
     glide_ratio: float
     minimum_required_altitude: float
     breakout_altitude: float
+    feasible: bool = True
 
 
 def calculate_turn_endpoint(
@@ -133,6 +135,8 @@ def calculate_breakout_geometry(
     descent_rate: float = 2.5,
     max_turn_rate: float = 30.0,
     breakout_altitude_margin: float = 2.0,
+    wind_x: float = 0.0,
+    wind_y: float = 0.0,
 ) -> BreakoutGeometry:
     """
     Calculate the path and altitude required to exit loiter and glide to target.
@@ -175,7 +179,6 @@ def calculate_breakout_geometry(
     turn_radius = forward_speed / omega_rad
 
     if rad_dist < 1e-9:
-        # Already at the target
         target_b = heading % 360.0
         h_err = 0.0
         turn_ang = 0.0
@@ -187,13 +190,13 @@ def calculate_breakout_geometry(
         l_required = 0.0
         h_min = 0.0
         h_breakout = breakout_altitude_margin
+        feasible = True
     else:
         target_b = bearing(position, target)
         h_err = heading_error(heading, target_b)
         turn_ang = abs(h_err)
         turn_dir = 1.0 if h_err >= 0.0 else -1.0
-        t_turn = turn_ang / max_turn_rate
-        l_turn = forward_speed * t_turn
+        
         endpoint = calculate_turn_endpoint(
             start_point=position,
             start_heading=heading,
@@ -202,9 +205,52 @@ def calculate_breakout_geometry(
             turn_radius=turn_radius,
         )
         l_straight = distance(endpoint, target)
+        
+        feasible = True
+        t_turn = 0.0
+        if turn_ang > 0:
+            num_steps = 20
+            dchi_deg = turn_ang / num_steps
+            dchi_rad = math.radians(dchi_deg)
+            ds = turn_radius * dchi_rad
+            for i in range(num_steps):
+                course_deg = (heading + turn_dir * (i + 0.5) * dchi_deg) % 360.0
+                comp = calculate_wind_corrected_heading(
+                    desired_course_deg=course_deg,
+                    airspeed=forward_speed,
+                    wind_x=wind_x,
+                    wind_y=wind_y
+                )
+                if not comp.feasible or comp.ground_speed_along_track <= 0.0:
+                    feasible = False
+                    break
+                t_turn += ds / comp.ground_speed_along_track
+        
+        t_straight = 0.0
+        if feasible and l_straight > 0.0:
+            straight_course = bearing(endpoint, target)
+            comp_straight = calculate_wind_corrected_heading(
+                desired_course_deg=straight_course,
+                airspeed=forward_speed,
+                wind_x=wind_x,
+                wind_y=wind_y
+            )
+            if not comp_straight.feasible or comp_straight.ground_speed_along_track <= 0.0:
+                feasible = False
+            else:
+                t_straight = l_straight / comp_straight.ground_speed_along_track
+                
+        l_turn = forward_speed * (turn_ang / max_turn_rate)
         l_required = l_turn + l_straight
-        h_min = l_required / glide_ratio
-        h_breakout = h_min + breakout_altitude_margin
+        
+        if feasible:
+            t_total = t_turn + t_straight
+            h_min = descent_rate * t_total
+            h_breakout = h_min + breakout_altitude_margin
+        else:
+            h_min = 0.0
+            h_breakout = breakout_altitude_margin
+            t_turn = 0.0
 
     return BreakoutGeometry(
         radial_distance=rad_dist,
@@ -221,6 +267,7 @@ def calculate_breakout_geometry(
         glide_ratio=glide_ratio,
         minimum_required_altitude=h_min,
         breakout_altitude=h_breakout,
+        feasible=feasible,
     )
 
 
@@ -231,21 +278,6 @@ def calculate_breakout_geometry_from_config(
     config: ParafoilConfig,
     breakout_altitude_margin: float = 2.0,
 ) -> BreakoutGeometry:
-    """
-    Convenience wrapper extracting vehicle parameters from ParafoilConfig.
-
-    Args:
-        position: Current CanSat position.
-        heading: Current CanSat heading in degrees [0, 360).
-        target: Landing target position.
-        config: ParafoilConfig instance providing forward_speed, descent_rate,
-            and max_turn_rate.
-        breakout_altitude_margin: Safety margin added to minimum altitude in metres
-            (must be >= 0, default 2.0).
-
-    Returns:
-        BreakoutGeometry dataclass.
-    """
     return calculate_breakout_geometry(
         position=position,
         heading=heading,
@@ -254,4 +286,6 @@ def calculate_breakout_geometry_from_config(
         descent_rate=config.descent_rate,
         max_turn_rate=config.max_turn_rate,
         breakout_altitude_margin=breakout_altitude_margin,
+        wind_x=config.wind_x,
+        wind_y=config.wind_y,
     )

@@ -351,3 +351,109 @@ def test_invalid_parameter_exceptions():
 
     with pytest.raises(ValueError, match="turn_angle"):
         calculate_turn_endpoint(pos, 0.0, turn_angle=-10.0, turn_direction=1.0, turn_radius=15.0)
+
+# =====================================================================
+# Phase 3.2d Wind-Aware Breakout Geometry Tests
+# =====================================================================
+
+def test_breakout_zero_wind_regression():
+    pos = LocalPoint(x=0.0, y=-30.0)
+    target = LocalPoint(x=0.0, y=0.0)
+    hdg = 270.0
+    
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5, max_turn_rate=30.0,
+        wind_x=0.0, wind_y=0.0
+    )
+    
+    assert geom.feasible is True
+    assert geom.turn_angle == pytest.approx(90.0)
+    assert geom.turn_duration == pytest.approx(3.0)
+    assert geom.minimum_required_altitude == pytest.approx(14.1304, rel=1e-3)
+
+def test_breakout_tailwind_plus_x():
+    # Tailwind pushing towards target (East)
+    # Pos: (0, 0), Target: (100, 0)
+    pos = LocalPoint(x=0.0, y=0.0)
+    target = LocalPoint(x=100.0, y=0.0)
+    hdg = 90.0 # East
+    
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5,
+        wind_x=3.0, wind_y=0.0
+    )
+    
+    # Ground speed = 8 + 3 = 11 m/s
+    # t_straight = 100 / 11 = 9.0909 s
+    # h_min = 9.0909 * 2.5 = 22.7272 m
+    assert geom.feasible is True
+    assert geom.turn_angle == 0.0
+    assert geom.minimum_required_altitude == pytest.approx(22.7272, rel=1e-3)
+
+def test_breakout_headwind_minus_x():
+    # Headwind pushing away from target
+    pos = LocalPoint(x=0.0, y=0.0)
+    target = LocalPoint(x=100.0, y=0.0)
+    hdg = 90.0
+    
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5,
+        wind_x=-3.0, wind_y=0.0
+    )
+    
+    # Ground speed = 8 - 3 = 5 m/s
+    # t_straight = 100 / 5 = 20 s
+    # h_min = 20 * 2.5 = 50.0 m
+    assert geom.feasible is True
+    assert geom.minimum_required_altitude == pytest.approx(50.0, rel=1e-3)
+
+def test_breakout_crosswind():
+    pos = LocalPoint(x=0.0, y=-30.0)
+    target = LocalPoint(x=0.0, y=0.0)
+    hdg = 270.0 # West
+    
+    # Crosswind in +X (East)
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5, max_turn_rate=30.0,
+        wind_x=3.0, wind_y=0.0
+    )
+    
+    assert geom.feasible is True
+    # The required altitude should be different from zero wind
+    # Zero wind h_min was ~14.13m. 
+    # With crosswind, it must correct crab angle and fly slower/faster along track.
+    assert geom.minimum_required_altitude > 0.0
+    assert geom.minimum_required_altitude != pytest.approx(14.1304, rel=1e-3)
+
+def test_breakout_infeasible_strong_headwind():
+    pos = LocalPoint(x=0.0, y=0.0)
+    target = LocalPoint(x=100.0, y=0.0)
+    hdg = 90.0
+    
+    # Wind stronger than airspeed
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5,
+        wind_x=-10.0, wind_y=0.0
+    )
+    
+    assert geom.feasible is False
+    assert geom.minimum_required_altitude == 0.0
+
+def test_breakout_near_critical_wind():
+    pos = LocalPoint(x=0.0, y=0.0)
+    target = LocalPoint(x=100.0, y=0.0)
+    hdg = 90.0
+    
+    # Headwind exactly equals airspeed
+    geom = calculate_breakout_geometry(
+        position=pos, heading=hdg, target=target,
+        forward_speed=8.0, descent_rate=2.5,
+        wind_x=-8.0, wind_y=0.0
+    )
+    
+    assert geom.feasible is False

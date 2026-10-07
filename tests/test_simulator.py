@@ -134,7 +134,7 @@ def test_terminal_guidance_transition_occurs_when_range_exceeds_threshold():
     state = ParafoilState(
         x=0.0,
         y=0.0,
-        altitude=600.0,
+        altitude=300.0,
         vx=0.0,
         vy=0.0,
         vz=0.0,
@@ -237,7 +237,7 @@ def test_spatial_gate_prevents_premature_entry_in_simulator():
     state = ParafoilState(
         x=0.0,
         y=0.0,
-        altitude=600.0,
+        altitude=300.0,
         vx=0.0,
         vy=0.0,
         vz=0.0,
@@ -264,7 +264,7 @@ def test_exact_capture_radius_boundary_in_simulator():
     state = ParafoilState(
         x=0.0,
         y=0.0,
-        altitude=600.0,
+        altitude=300.0,
         vx=0.0,
         vy=0.0,
         vz=0.0,
@@ -291,7 +291,7 @@ def test_configured_capture_radius_in_simulator():
     state = ParafoilState(
         x=0.0,
         y=0.0,
-        altitude=600.0,
+        altitude=300.0,
         vx=0.0,
         vy=0.0,
         vz=0.0,

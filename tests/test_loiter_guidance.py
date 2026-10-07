@@ -283,3 +283,18 @@ def test_invalid_speeds_and_limits_raise():
 
     with pytest.raises(ValueError):
         LoiterGuidance(center=center, max_turn_rate=0.0)
+
+
+def test_wind_aware_loiter_tangent_heading():
+    center = LocalPoint(0.0, 0.0)
+    radius = 30.0
+    guidance = LoiterGuidance(center=center, loiter_radius=radius, forward_speed=8.0)
+    
+    guidance.set_wind(0.0, 0.0)
+    pos = LocalPoint(30.0, 0.0)
+    out = guidance.update(position=pos, current_heading=180.0)
+    assert pytest.approx(out.desired_heading, abs=0.1) == 180.0
+    
+    guidance.set_wind(3.0, 0.0)
+    out_wind = guidance.update(position=pos, current_heading=180.0)
+    assert pytest.approx(out_wind.desired_heading, abs=0.5) == 202.0

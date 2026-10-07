@@ -448,9 +448,24 @@ class ParafoilSimulator:
                         self.target_position
                     ),
                 ):
-                    self.state_machine.transition_to(
-                        FlightState.TERMINAL_GUIDANCE
+                    pos = LocalPoint(self.state.x, self.state.y)
+                    geom = calculate_breakout_geometry(
+                        position=pos,
+                        heading=self.state.heading,
+                        target=self.target_position,
+                        forward_speed=self.parafoil_config.forward_speed,
+                        descent_rate=self.parafoil_config.descent_rate,
+                        max_turn_rate=self.parafoil_config.max_turn_rate,
+                        breakout_altitude_margin=self.breakout_altitude_margin,
+                        wind_x=self.parafoil_config.wind_x,
+                        wind_y=self.parafoil_config.wind_y,
                     )
+                    available_terminal_time = (self.state.altitude - geom.breakout_altitude) / self.parafoil_config.descent_rate
+                    
+                    if available_terminal_time <= self.max_terminal_guidance_time:
+                        self.state_machine.transition_to(
+                            FlightState.TERMINAL_GUIDANCE
+                        )
                     self.terminal_entry_time = self.time
                     self.terminal_entry_altitude = self.state.altitude
                     self.terminal_entry_distance = target_distance
@@ -513,6 +528,8 @@ class ParafoilSimulator:
                         descent_rate=self.parafoil_config.descent_rate,
                         max_turn_rate=self.parafoil_config.max_turn_rate,
                         breakout_altitude_margin=self.breakout_altitude_margin,
+                        wind_x=self.parafoil_config.wind_x,
+                        wind_y=self.parafoil_config.wind_y,
                     )
                     self.last_breakout_geometry = geom
 
