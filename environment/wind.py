@@ -111,17 +111,20 @@ class CosineGust:
 
 
 class ComposedWindField:
-    """WindField that composes a base altitude wind with a time-varying gust."""
-    def __init__(self, base_wind: WindField, gust: CosineGust):
+    """WindField that composes a base altitude wind with one or more time-varying gusts."""
+    def __init__(self, base_wind: WindField, *gusts: CosineGust):
         self.base_wind = base_wind
-        self.gust = gust
+        self.gusts = gusts
         
     def wind_at_altitude(self, altitude: float) -> Tuple[float, float]:
         """Provides steady state wind (time=0)."""
         return self.wind_at(altitude, 0.0)
         
     def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
-        bx, by = self.base_wind.wind_at_altitude(altitude)
-        gx, gy = self.gust.evaluate(time)
-        return (bx + gx, by + gy)
+        wx, wy = self.base_wind.wind_at_altitude(altitude)
+        for gust in self.gusts:
+            gx, gy = gust.evaluate(time)
+            wx += gx
+            wy += gy
+        return (wx, wy)
 
