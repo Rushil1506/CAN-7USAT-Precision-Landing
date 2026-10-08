@@ -111,10 +111,10 @@ class CosineGust:
 
 
 class ComposedWindField:
-    """WindField that composes a base altitude wind with one or more time-varying gusts."""
-    def __init__(self, base_wind: WindField, *gusts: CosineGust):
+    """WindField that composes a base altitude wind with one or more time-varying modifiers (gusts, turbulence)."""
+    def __init__(self, base_wind: WindField, *modifiers):
         self.base_wind = base_wind
-        self.gusts = gusts
+        self.modifiers = modifiers
         
     def wind_at_altitude(self, altitude: float) -> Tuple[float, float]:
         """Provides steady state wind (time=0)."""
@@ -122,9 +122,65 @@ class ComposedWindField:
         
     def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
         wx, wy = self.base_wind.wind_at_altitude(altitude)
-        for gust in self.gusts:
-            gx, gy = gust.evaluate(time)
+        for modifier in self.modifiers:
+            gx, gy = modifier.evaluate(time)
             wx += gx
             wy += gy
         return (wx, wy)
+
+import random
+
+class StochasticWind:
+    """Synthetic stochastic wind disturbance for controller robustness characterization.
+    
+    Implements a bounded Ornstein-Uhlenbeck process.
+    """
+    def __init__(self, std_dev: float, correlation_time: float, seed: int = 42):
+        if std_dev < 0.0 or not math.isfinite(std_dev):
+            raise ValueError("std_dev must be non-negative and finite")
+        if correlation_time <= 0.0 or not math.isfinite(correlation_time):
+            raise ValueError("correlation_time must be positive and finite")
+            
+        self.std_dev = std_dev
+        self.correlation_time = correlation_time
+        self.seed = seed
+        self.rng = random.Random(seed)
+        
+        self.last_time = 0.0
+        self.current_wx = 0.0
+        self.current_wy = 0.0
+        
+    def evaluate(self, time: float) -> Tuple[float, float]:
+        if not math.isfinite(time):
+            raise ValueError("Time must be finite")
+            
+        if time < self.last_time:
+            # Reset if time goes backwards (e.g., new simulation run)
+            self.rng = random.Random(self.seed)
+            self.last_time = 0.0
+            self.current_wx = 0.0
+            self.current_wy = 0.0
+            
+        if time <= self.last_time:
+            return (self.current_wx, self.current_wy)
+            
+        dt = time - self.last_time
+        self.last_time = time
+        
+        theta = 1.0 / self.correlation_time
+        sigma_noise = self.std_dev * math.sqrt(2.0 * theta)
+        
+        noise_x = self.rng.gauss(0.0, 1.0)
+        self.current_wx += -theta * self.current_wx * dt + sigma_noise * math.sqrt(dt) * noise_x
+        
+        noise_y = self.rng.gauss(0.0, 1.0)
+        self.current_wy += -theta * self.current_wy * dt + sigma_noise * math.sqrt(dt) * noise_y
+        
+        # Bounded
+        limit = 3.0 * self.std_dev
+        self.current_wx = max(-limit, min(limit, self.current_wx))
+        self.current_wy = max(-limit, min(limit, self.current_wy))
+        
+        return (self.current_wx, self.current_wy)
+
 
