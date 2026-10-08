@@ -24,8 +24,8 @@ class PIDController:
     output_min: float = -1.0
     output_max: float = 1.0
 
-    integral_min: float = -1.0
-    integral_max: float = 1.0
+    integral_min: float = -10.0
+    integral_max: float = 10.0
 
     integral: float = 0.0
     previous_error: float = 0.0

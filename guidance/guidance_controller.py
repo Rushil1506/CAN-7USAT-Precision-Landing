@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 from control.pid import PIDController
 from navigation.bearing import bearing
@@ -130,7 +131,8 @@ class GuidanceController:
             desired_heading = wind_comp.heading_deg
             
             error = heading_error(heading, desired_heading)
-            steering = self.pid.update(error=error, dt=dt)
+            error_rad = math.radians(error)
+            steering = self.pid.update(error=error_rad, dt=dt)
 
             final_approach = (
                 altitude <= self.final_approach_altitude
@@ -172,7 +174,8 @@ class GuidanceController:
         desired_heading = wind_comp.heading_deg
         
         error = heading_error(heading, desired_heading)
-        steering = self.pid.update(error=error, dt=dt)
+        error_rad = math.radians(error)
+        steering = self.pid.update(error=error_rad, dt=dt)
 
         target = self.waypoint_manager.target
         target_distance = _distance_xy(position, target)

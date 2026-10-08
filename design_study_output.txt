@@ -1,0 +1,55 @@
+=== 2. ANALYTICAL PROPORTIONAL BAND ===
+kp    |   5  ° |  10  ° |  15  ° |  20  ° |  30  ° |  45  ° |  90  ° |  180 °
+---------------------------------------------------------------------------
+2.5   |  0.22 |  0.44 |  0.65 |  0.87 |  1.31 |  1.96 |  3.93 |  7.85
+5.0   |  0.44 |  0.87 |  1.31 |  1.75 |  2.62 |  3.93 |  7.85 | 15.71
+7.5   |  0.65 |  1.31 |  1.96 |  2.62 |  3.93 |  5.89 | 11.78 | 23.56
+10.0  |  0.87 |  1.75 |  2.62 |  3.49 |  5.24 |  7.85 | 15.71 | 31.42
+15.0  |  1.31 |  2.62 |  3.93 |  5.24 |  7.85 | 11.78 | 23.56 | 47.12
+
+Error (deg) to reach saturation (P=1.0):
+kp = 2.5  -> 22.9°
+kp = 5.0  -> 11.5°
+kp = 7.5  -> 7.6°
+kp = 10.0 -> 5.7°
+kp = 15.0 -> 3.8°
+
+=== 3. KP SENSITIVITY STUDY ===
+
+Scenario: Zero Wind
+kp=2.5                    | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D:  7.0/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+kp=5.0                    | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D: 14.1/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+kp=7.5                    | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D: 21.1/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+kp=10.0                   | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D: 28.1/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+kp=15.0                   | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D: 42.2/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+kp=20.0                   | Err:    4.3m | Sat:  8.2% | Chtr:   0 | Max P/I/D: 56.3/ 0.7/ 7.9 | Max TR: 30.0 | Term Stable: True
+
+Scenario: Crosswind 4m/s
+kp=2.5                    | Err:   18.9m | Sat:  9.3% | Chtr:   1 | Max P/I/D:  7.9/ 0.7/31.4 | Max TR: 30.0 | Term Stable: True
+kp=5.0                    | Err:   16.1m | Sat:  9.8% | Chtr:   0 | Max P/I/D: 15.2/ 0.7/11.1 | Max TR: 30.0 | Term Stable: True
+kp=7.5                    | Err:   15.9m | Sat: 10.3% | Chtr:   0 | Max P/I/D: 22.5/ 0.7/11.0 | Max TR: 30.0 | Term Stable: True
+kp=10.0                   | Err:   14.8m | Sat: 10.4% | Chtr:   0 | Max P/I/D: 29.6/ 0.7/11.0 | Max TR: 30.0 | Term Stable: True
+kp=15.0                   | Err:   13.4m | Sat: 10.4% | Chtr:   0 | Max P/I/D: 43.1/ 0.6/11.1 | Max TR: 30.0 | Term Stable: True
+kp=20.0                   | Err:   12.9m | Sat: 10.5% | Chtr:   0 | Max P/I/D: 56.6/ 0.6/11.1 | Max TR: 30.0 | Term Stable: True
+
+Scenario: Tau=1s Stochastic
+kp=2.5                    | Err:   19.1m | Sat: 53.5% | Chtr:   2 | Max P/I/D:  7.8/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kp=5.0                    | Err:    2.1m | Sat: 53.8% | Chtr:   3 | Max P/I/D: 15.7/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kp=7.5                    | Err:    2.4m | Sat: 55.7% | Chtr:   2 | Max P/I/D: 23.5/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kp=10.0                   | Err:    0.6m | Sat: 56.4% | Chtr:   4 | Max P/I/D: 31.3/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kp=15.0                   | Err:   13.6m | Sat: 56.2% | Chtr:   6 | Max P/I/D: 47.0/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kp=20.0                   | Err:   29.8m | Sat: 55.2% | Chtr:   8 | Max P/I/D: 62.8/ 1.0/31.4 | Max TR: 30.0 | Term Stable: False
+
+=== 4. KD SENSITIVITY STUDY ===
+kd=0.0                    | Err:   28.0m | Sat: 55.8% | Chtr:   4 | Max P/I/D: 31.4/ 1.0/ 0.0 | Max TR: 30.0 | Term Stable: False
+kd=0.5                    | Err:    0.6m | Sat: 56.4% | Chtr:   4 | Max P/I/D: 31.3/ 1.0/31.2 | Max TR: 30.0 | Term Stable: False
+kd=1.0                    | Err:    6.1m | Sat: 56.1% | Chtr:   7 | Max P/I/D: 31.3/ 1.0/62.5 | Max TR: 30.0 | Term Stable: False
+kd=2.0                    | Err:    0.6m | Sat: 80.2% | Chtr: 567 | Max P/I/D: 31.3/ 1.0/124.9 | Max TR: 30.0 | Term Stable: False
+kd=5.0                    | Err:    1.9m | Sat: 90.7% | Chtr: 806 | Max P/I/D: 31.3/ 1.0/312.1 | Max TR: 30.0 | Term Stable: False
+
+=== 5. KI SENSITIVITY STUDY ===
+ki=0.0                    | Err:   10.8m | Sat: 10.0% | Chtr:   0 | Max P/I/D: 25.7/ 0.0/22.2 | Max TR: 30.0 | Term Stable: True
+ki=0.1                    | Err:   14.8m | Sat: 10.2% | Chtr:   0 | Max P/I/D: 29.6/ 0.7/22.0 | Max TR: 30.0 | Term Stable: True
+ki=0.5                    | Err:   21.1m | Sat: 10.6% | Chtr:   1 | Max P/I/D: 31.4/ 2.8/62.7 | Max TR: 30.0 | Term Stable: True
+ki=1.0                    | Err:   15.5m | Sat: 11.0% | Chtr:   1 | Max P/I/D: 31.3/ 5.4/62.4 | Max TR: 30.0 | Term Stable: True
+ki=2.0                    | Err:   11.1m | Sat: 10.2% | Chtr:   1 | Max P/I/D: 30.8/14.9/60.5 | Max TR: 30.0 | Term Stable: True

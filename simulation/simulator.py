@@ -31,6 +31,7 @@ from flight.state_machine import (
 )
 
 from environment.wind import WindField, ConstantWindField
+from guidance.wind_estimator import WindEstimator
 
 
 @dataclass
@@ -120,6 +121,7 @@ class ParafoilSimulator:
         wind_x: float = 0.0,
         wind_y: float = 0.0,
         wind_field: Optional[WindField] = None,
+        wind_estimator: Optional[WindEstimator] = None,
     ):
 
         # --------------------------------------------------
@@ -176,6 +178,9 @@ class ParafoilSimulator:
         initial_wx, initial_wy = self.wind_field.wind_at(self.state.altitude, 0.0)
         self.parafoil_config.wind_x = initial_wx
         self.parafoil_config.wind_y = initial_wy
+        
+        self.wind_estimator = wind_estimator or WindEstimator()
+        self.wind_estimator.update(initial_wx, initial_wy)
 
         self.model = ParafoilModel(
             state=state,
@@ -621,6 +626,9 @@ class ParafoilSimulator:
         current_wx, current_wy = self.wind_field.wind_at(self.state.altitude, getattr(self, "time", 0.0))
         self.parafoil_config.wind_x = current_wx
         self.parafoil_config.wind_y = current_wy
+        
+        # Update shared wind estimator (once per sim step, representing flight software)
+        self.wind_estimator.update(current_wx, current_wy)
 
         current_state = self.state_machine.get_state()
 
@@ -769,6 +777,8 @@ class ParafoilSimulator:
             elif current_state == FlightState.TERMINAL_GUIDANCE:
 
                 if self.loiter_guidance is not None:
+                    # Provide the estimator's filtered wind to loiter guidance
+                    self.loiter_guidance.set_wind(self.wind_estimator.wind_x, self.wind_estimator.wind_y)
                     loiter_out = self.loiter_guidance.update(
                         position=LocalPoint(self.state.x, self.state.y),
                         current_heading=self.state.heading,

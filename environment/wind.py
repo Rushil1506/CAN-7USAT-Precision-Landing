@@ -18,6 +18,10 @@ class WindField(Protocol):
         """Get the (wind_x, wind_y) vector at given altitude and time."""
         ...
 
+    def reset(self) -> None:
+        """Explicitly reset any stochastic or time-varying state to reproducible initial conditions."""
+        ...
+
 class ConstantWindField:
     """A WindField that returns the same wind vector at all altitudes and times."""
     def __init__(self, wind_x: float, wind_y: float):
@@ -29,6 +33,9 @@ class ConstantWindField:
         
     def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
         return (self.wind_x, self.wind_y)
+
+    def reset(self) -> None:
+        pass
 
 from typing import List
 
@@ -83,6 +90,8 @@ class PiecewiseWindField:
     def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
         return self.wind_at_altitude(altitude)
 
+    def reset(self) -> None:
+        pass
 
 class CosineGust:
     """Deterministic 1-Cosine Gust Model."""
@@ -109,6 +118,8 @@ class CosineGust:
         scale = 0.5 * (1.0 - math.cos(2.0 * math.pi * (time - self.t_start) / self.duration))
         return (self.gust_x * scale, self.gust_y * scale)
 
+    def reset(self) -> None:
+        pass
 
 class ComposedWindField:
     """WindField that composes a base altitude wind with one or more time-varying modifiers (gusts, turbulence)."""
@@ -127,6 +138,12 @@ class ComposedWindField:
             wx += gx
             wy += gy
         return (wx, wy)
+
+    def reset(self) -> None:
+        self.base_wind.reset()
+        for modifier in self.modifiers:
+            if hasattr(modifier, 'reset'):
+                modifier.reset()
 
 import random
 
@@ -150,18 +167,19 @@ class StochasticWind:
         self.current_wx = 0.0
         self.current_wy = 0.0
         
+    def reset(self) -> None:
+        """Explicitly reset the stochastic process to its initial seeded state."""
+        self.rng = random.Random(self.seed)
+        self.last_time = 0.0
+        self.current_wx = 0.0
+        self.current_wy = 0.0
+        
     def evaluate(self, time: float) -> Tuple[float, float]:
         if not math.isfinite(time):
             raise ValueError("Time must be finite")
             
-        if time < self.last_time:
-            # Reset if time goes backwards (e.g., new simulation run)
-            self.rng = random.Random(self.seed)
-            self.last_time = 0.0
-            self.current_wx = 0.0
-            self.current_wy = 0.0
-            
         if time <= self.last_time:
+            # Snapshot query: return the current state without advancing or resetting
             return (self.current_wx, self.current_wy)
             
         dt = time - self.last_time

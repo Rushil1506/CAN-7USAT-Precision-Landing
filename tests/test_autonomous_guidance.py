@@ -21,13 +21,13 @@ def test_autonomous_guidance_reaches_target_without_manual_steering():
     guidance = GuidanceController(
         manager,
         PIDController(
-            kp=0.022,
-            ki=0.00015,
-            kd=0.004,
+            kp=2.5,
+            ki=0.1,
+            kd=0.5,
             output_min=-1.0,
             output_max=1.0,
-            integral_min=-200.0,
-            integral_max=200.0,
+            integral_min=-10.0,
+            integral_max=10.0,
         ),
         final_approach_altitude=120.0,
         final_approach_radius=100.0,
