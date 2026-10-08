@@ -12,7 +12,7 @@ def test_radian_conversion_and_pid_response():
     )
     
     pid = PIDController(
-        kp=2.5,
+        kp=10.0,
         ki=0.1,
         kd=0.5,
         output_min=-1.0,
@@ -45,7 +45,7 @@ def test_radian_conversion_and_pid_response():
     error_deg_small = 1.0
     error_rad_small = math.radians(error_deg_small)
     
-    expected_p = 2.5 * error_rad_small
+    expected_p = 10.0 * error_rad_small
     expected_d = 0.5 * (error_rad_small - 0.0) / 0.1
     expected_i = 0.1 * error_rad_small * 0.1
     expected_steering = expected_p + expected_d + expected_i
