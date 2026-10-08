@@ -464,33 +464,38 @@ class ParafoilSimulator:
                     wind_field=self.wind_field,
                 ):
                     pos = LocalPoint(self.state.x, self.state.y)
-                    geom = calculate_breakout_geometry(
+                    
+                    from guidance.shear_orbit_planner import solve_shear_terminal_plan
+                    
+                    plan = solve_shear_terminal_plan(
                         position=pos,
-                        heading=self.state.heading,
                         target=self.target_position,
+                        current_altitude=self.state.altitude,
+                        wind_field=self.wind_field,
                         forward_speed=self.parafoil_config.forward_speed,
                         descent_rate=self.parafoil_config.descent_rate,
-                        max_turn_rate=self.parafoil_config.max_turn_rate,
+                        orbit_radius=self.loiter_radius,
                         breakout_altitude_margin=self.breakout_altitude_margin,
-                        wind_x=self.parafoil_config.wind_x,
-                        wind_y=self.parafoil_config.wind_y,
-                    )
-                    self.state_machine.transition_to(
-                        FlightState.TERMINAL_GUIDANCE
                     )
                     
-                    from guidance.glide_range import calculate_glide_range
-                    self.terminal_entry_glide_range = calculate_glide_range(
-                        altitude=self.state.altitude,
-                        descent_rate=self.parafoil_config.descent_rate,
-                        horizontal_speed=self.parafoil_config.forward_speed,
-                        wind_x=self.parafoil_config.wind_x,
-                        wind_y=self.parafoil_config.wind_y,
-                        desired_course_deg=bearing(
-                            LocalPoint(self.state.x, self.state.y),
-                            self.target_position
+                    if plan is not None and plan.feasible:
+                        self.terminal_orbit_plan = plan
+                        self.state_machine.transition_to(
+                            FlightState.TERMINAL_GUIDANCE
                         )
-                    )
+                        
+                        from guidance.glide_range import calculate_glide_range
+                        self.terminal_entry_glide_range = calculate_glide_range(
+                            altitude=self.state.altitude,
+                            descent_rate=self.parafoil_config.descent_rate,
+                            horizontal_speed=self.parafoil_config.forward_speed,
+                            wind_field=self.wind_field,
+                            desired_course_deg=bearing(
+                                LocalPoint(self.state.x, self.state.y),
+                                self.target_position
+                            )
+                        )
+
 
         # --------------------------------------------------
         # TERMINAL GUIDANCE → FINAL APPROACH / FAILSAFE
@@ -506,27 +511,8 @@ class ParafoilSimulator:
                         LocalPoint(self.state.x, self.state.y),
                         self.target_position,
                     )
-                self.terminal_entry_glide_range = (
-                    self.parafoil_config.forward_speed
-                    * self.state.altitude
-                    / self.parafoil_config.descent_rate
-                )
-                
-                if self.target_position is not None:
-                    from guidance.orbit_planner import plan_terminal_orbit
-                    
-                    self.terminal_orbit_plan = plan_terminal_orbit(
-                        position=LocalPoint(self.state.x, self.state.y),
-                        target=self.target_position,
-                        current_altitude=self.state.altitude,
-                        wind_x=self.parafoil_config.wind_x,
-                        wind_y=self.parafoil_config.wind_y,
-                        forward_speed=self.parafoil_config.forward_speed,
-                        descent_rate=self.parafoil_config.descent_rate,
-                        orbit_radius=self.loiter_radius,
-                        breakout_altitude_margin=self.breakout_altitude_margin,
-                    )
-                    
+                if self.target_position is not None and hasattr(self, 'terminal_orbit_plan'):
+
                     if self.loiter_guidance is not None:
                         self.loiter_guidance.center = self.terminal_orbit_plan.orbit_center
                         self.loiter_guidance.direction = self.terminal_orbit_plan.orbit_direction
