@@ -173,7 +173,7 @@ class ParafoilSimulator:
             
         # Override config wind fields for convenience as required by single source of truth rule
         # Use initial altitude wind
-        initial_wx, initial_wy = self.wind_field.wind_at_altitude(self.state.altitude)
+        initial_wx, initial_wy = self.wind_field.wind_at(self.state.altitude, 0.0)
         self.parafoil_config.wind_x = initial_wx
         self.parafoil_config.wind_y = initial_wy
 
@@ -617,8 +617,8 @@ class ParafoilSimulator:
         Advance the simulation by one timestep.
         """
         
-        # Update current environment wind based on altitude
-        current_wx, current_wy = self.wind_field.wind_at_altitude(self.state.altitude)
+        # Update current environment wind based on altitude and time
+        current_wx, current_wy = self.wind_field.wind_at(self.state.altitude, getattr(self, "time", 0.0))
         self.parafoil_config.wind_x = current_wx
         self.parafoil_config.wind_y = current_wy
 

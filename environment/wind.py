@@ -1,7 +1,8 @@
 from typing import Protocol, Tuple
+import math
 
 class WindField(Protocol):
-    """Protocol for an altitude-dependent wind field.
+    """Protocol for a wind field.
     
     Coordinate convention:
     +X = East
@@ -10,19 +11,25 @@ class WindField(Protocol):
     Wind vector represents the direction the air is moving TOWARD.
     """
     def wind_at_altitude(self, altitude: float) -> Tuple[float, float]:
-        """Get the (wind_x, wind_y) vector at the given altitude [m/s]."""
+        """Get the (wind_x, wind_y) vector at the given altitude [m/s] (assumes time=0 or steady)."""
+        ...
+        
+    def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
+        """Get the (wind_x, wind_y) vector at given altitude and time."""
         ...
 
 class ConstantWindField:
-    """A WindField that returns the same wind vector at all altitudes."""
+    """A WindField that returns the same wind vector at all altitudes and times."""
     def __init__(self, wind_x: float, wind_y: float):
         self.wind_x = wind_x
         self.wind_y = wind_y
         
     def wind_at_altitude(self, altitude: float) -> Tuple[float, float]:
         return (self.wind_x, self.wind_y)
+        
+    def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
+        return (self.wind_x, self.wind_y)
 
-import math
 from typing import List
 
 class PiecewiseWindField:
@@ -71,5 +78,50 @@ class PiecewiseWindField:
                 wy = wy0 + (wy1 - wy0) * t
                 return (wx, wy)
                 
-        # Should never reach here due to clamping
         return self.points[-1][1]
+        
+    def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
+        return self.wind_at_altitude(altitude)
+
+
+class CosineGust:
+    """Deterministic 1-Cosine Gust Model."""
+    def __init__(self, gust_x: float, gust_y: float, t_start: float, duration: float):
+        if not math.isfinite(gust_x) or not math.isfinite(gust_y):
+            raise ValueError("Gust components must be finite")
+        if not math.isfinite(t_start):
+            raise ValueError("t_start must be finite")
+        if not math.isfinite(duration) or duration <= 0.0:
+            raise ValueError("duration must be finite and positive")
+            
+        self.gust_x = gust_x
+        self.gust_y = gust_y
+        self.t_start = t_start
+        self.duration = duration
+        
+    def evaluate(self, time: float) -> Tuple[float, float]:
+        if not math.isfinite(time):
+            raise ValueError("Time must be finite")
+            
+        if time < self.t_start or time > self.t_start + self.duration:
+            return (0.0, 0.0)
+            
+        scale = 0.5 * (1.0 - math.cos(2.0 * math.pi * (time - self.t_start) / self.duration))
+        return (self.gust_x * scale, self.gust_y * scale)
+
+
+class ComposedWindField:
+    """WindField that composes a base altitude wind with a time-varying gust."""
+    def __init__(self, base_wind: WindField, gust: CosineGust):
+        self.base_wind = base_wind
+        self.gust = gust
+        
+    def wind_at_altitude(self, altitude: float) -> Tuple[float, float]:
+        """Provides steady state wind (time=0)."""
+        return self.wind_at(altitude, 0.0)
+        
+    def wind_at(self, altitude: float, time: float) -> Tuple[float, float]:
+        bx, by = self.base_wind.wind_at_altitude(altitude)
+        gx, gy = self.gust.evaluate(time)
+        return (bx + gx, by + gy)
+
