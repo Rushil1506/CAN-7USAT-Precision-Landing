@@ -69,7 +69,7 @@ Implemented via a timestamped double-ended queue. Values within the initial tran
 ### 3.2 Asymmetric Deadband with Linear Rescaling
 To avoid artificial gain discontinuities at the deadband boundary, commands outside the deadband threshold are linearly scaled to reach full deflection at $\pm 1.0$:
 $$
-u_{\text{db}}(t) = 
+u_{\text{db}}(t) =
 \begin{cases}
 0.0, & -\delta_{\text{neg}} \le u_{\text{delayed}}(t) \le \delta_{\text{pos}} \\
 \frac{u_{\text{delayed}}(t) - \delta_{\text{pos}}}{u_{\text{max}} - \delta_{\text{pos}}} \cdot u_{\text{max}}, & u_{\text{delayed}}(t) > \delta_{\text{pos}} \\

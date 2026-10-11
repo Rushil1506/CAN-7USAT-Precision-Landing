@@ -98,7 +98,7 @@ def test_actuator_slew_rate_limiting():
     # Slew rate 2.0/s: in dt=0.1s, max change is 0.2
     config = ActuatorConfig(max_slew_rate=2.0)
     model = ActuatorModel(config)
-    
+
     # Step from 0 to 1.0
     out1 = model.update(1.0, dt=0.1)
     assert out1 == pytest.approx(0.2)
@@ -121,7 +121,7 @@ def test_actuator_slew_rate_limiting():
 def test_actuator_slew_rate_small_step_not_limited():
     config = ActuatorConfig(max_slew_rate=2.0)
     model = ActuatorModel(config)
-    
+
     # Small step within rate capability (0.1 < 0.2)
     out = model.update(0.1, dt=0.1)
     assert out == pytest.approx(0.1)
@@ -131,14 +131,14 @@ def test_actuator_transport_delay():
     # Delay 0.2s with dt=0.1s -> 2 step delay
     config = ActuatorConfig(transport_delay=0.2)
     model = ActuatorModel(config)
-    
+
     # Initial command is 1.0
     out1 = model.update(1.0, dt=0.1)
     assert out1 == pytest.approx(0.0)  # Delayed: seeing initial buffer value (0.0)
-    
+
     out2 = model.update(1.0, dt=0.1)
     assert out2 == pytest.approx(0.0)  # Delayed: seeing initial buffer value (0.0)
-    
+
     out3 = model.update(1.0, dt=0.1)
     assert out3 == pytest.approx(1.0)  # 2 steps elapsed, command arrives
 
@@ -147,7 +147,7 @@ def test_actuator_transport_delay_with_varying_commands():
     config = ActuatorConfig(transport_delay=0.3)
     model = ActuatorModel(config)
     dt = 0.1  # 3 delay steps
-    
+
     cmds = [0.2, 0.4, 0.6, 0.8, 1.0]
     # For steps 0, 1, 2, outputs should be 0.0
     assert model.update(cmds[0], dt=dt) == pytest.approx(0.0)
@@ -163,17 +163,17 @@ def test_actuator_deadband_symmetric():
     config = ActuatorConfig(deadband_positive=0.05, deadband_negative=0.05)
     model = ActuatorModel(config)
     dt = 0.1
-    
+
     # Commands within deadband produce 0.0
     assert model.update(0.02, dt=dt) == pytest.approx(0.0)
     assert model.update(-0.03, dt=dt) == pytest.approx(0.0)
     assert model.update(0.05, dt=dt) == pytest.approx(0.0)
     assert model.update(-0.05, dt=dt) == pytest.approx(0.0)
-    
+
     # Command beyond deadband is rescaled
     # For cmd = 0.10: (0.10 - 0.05) / (1.0 - 0.05) = 0.05 / 0.95 ≈ 0.0526315
     assert model.update(0.10, dt=dt) == pytest.approx(0.05 / 0.95)
-    
+
     # At full scale cmd = 1.0: (1.0 - 0.05) / (1.0 - 0.05) = 1.0
     assert model.update(1.0, dt=dt) == pytest.approx(1.0)
     assert model.update(-1.0, dt=dt) == pytest.approx(-1.0)
@@ -183,14 +183,14 @@ def test_actuator_deadband_asymmetric():
     config = ActuatorConfig(deadband_positive=0.10, deadband_negative=0.04)
     model = ActuatorModel(config)
     dt = 0.1
-    
+
     # Within respective deadbands
     assert model.update(0.08, dt=dt) == pytest.approx(0.0)
     assert model.update(-0.03, dt=dt) == pytest.approx(0.0)
-    
+
     # Beyond negative deadband: (-0.10 + 0.04) / (1.0 - 0.04) = -0.06 / 0.96 = -0.0625
     assert model.update(-0.10, dt=dt) == pytest.approx(-0.0625)
-    
+
     # Beyond positive deadband: (0.20 - 0.10) / (1.0 - 0.10) = 0.10 / 0.90
     assert model.update(0.20, dt=dt) == pytest.approx(0.10 / 0.90)
 
@@ -207,17 +207,17 @@ def test_actuator_combined_dynamics():
     )
     model = ActuatorModel(config)
     dt = 0.1
-    
+
     # Step 1: Cmd 0.8. In delay buffer -> output is 0.0
     out1 = model.update(0.8, dt=dt)
     assert out1 == pytest.approx(0.0)
-    
+
     # Step 2: Cmd 0.8. Out of buffer comes 0.8 from step 1.
     # Deadband rescales 0.8 -> (0.8 - 0.05) / 0.95 = 0.75 / 0.95 ≈ 0.78947
     # Slew rate limits delta from 0.0 to 0.2 max!
     out2 = model.update(0.8, dt=dt)
     assert out2 == pytest.approx(0.2)
-    
+
     # Step 3: Delta again limited to +0.2 -> 0.4
     out3 = model.update(0.8, dt=dt)
     assert out3 == pytest.approx(0.4)
@@ -227,16 +227,16 @@ def test_actuator_reset():
     config = ActuatorConfig(transport_delay=0.2, max_slew_rate=1.0)
     model = ActuatorModel(config)
     dt = 0.1
-    
+
     model.update(1.0, dt=dt)
     model.update(1.0, dt=dt)
     model.update(1.0, dt=dt)
     assert model.current_output > 0.0
-    
+
     # Reset to 0.0
     model.reset(0.0)
     assert model.current_output == 0.0
-    
+
     # Buffer should be reset: step 1 output should be 0.0
     assert model.update(1.0, dt=dt) == pytest.approx(0.0)
 
@@ -287,7 +287,7 @@ def test_simulator_without_actuator_model_records_identical_steering():
     # Transition to PRECISION_GUIDANCE via PARAFOIL_DEPLOYMENT
     sim.state_machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
     sim.state_machine.transition_to(FlightState.PRECISION_GUIDANCE)
-    
+
     sim.step(0.75)
     sample = sim.history[-1]
     assert sample.steering == pytest.approx(0.75)
@@ -299,7 +299,7 @@ def test_simulator_with_actuator_model_records_dynamics():
     sim = _make_test_simulator(actuator_model=actuator)
     sim.state_machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
     sim.state_machine.transition_to(FlightState.PRECISION_GUIDANCE)
-    
+
     # Command 1.0, slew rate limits to 0.2 at dt=0.1
     sim.step(1.0)
     sample = sim.history[-1]

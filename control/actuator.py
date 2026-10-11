@@ -65,10 +65,10 @@ class ActuatorConfig:
         # Resolve aliases
         self.min_command = min_command if min_command is not None else (steering_min if steering_min is not None else -1.0)
         self.max_command = max_command if max_command is not None else (steering_max if steering_max is not None else 1.0)
-        
+
         self.slew_rate_limit = slew_rate_limit if slew_rate_limit is not None else max_slew_rate
         self.delay_seconds = delay_seconds if delay_seconds is not None else (transport_delay if transport_delay is not None else 0.0)
-        
+
         self.deadband_positive = deadband_positive
         self.deadband_negative = deadband_negative
         self.initial_position = initial_position
@@ -80,7 +80,7 @@ class ActuatorConfig:
             raise ValueError("Command limits must be finite numbers")
         if self.min_command >= self.max_command:
             raise ValueError(f"steering_min must be less than steering_max: {self.min_command} >= {self.max_command}")
-        
+
         if self.slew_rate_limit is not None:
             if math.isnan(self.slew_rate_limit):
                 raise ValueError("slew_rate_limit cannot be NaN")

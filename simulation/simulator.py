@@ -172,18 +172,18 @@ class ParafoilSimulator:
 
         self.state = state
         self.parafoil_config = parafoil_config
-        
+
         if wind_field is not None:
             self.wind_field = wind_field
         else:
             self.wind_field = ConstantWindField(wind_x, wind_y)
-            
+
         # Override config wind fields for convenience as required by single source of truth rule
         # Use initial altitude wind
         initial_wx, initial_wy = self.wind_field.wind_at(self.state.altitude, 0.0)
         self.parafoil_config.wind_x = initial_wx
         self.parafoil_config.wind_y = initial_wy
-        
+
         self.wind_estimator = wind_estimator or WindEstimator()
         self.wind_estimator.update(initial_wx, initial_wy)
 
@@ -358,12 +358,12 @@ class ParafoilSimulator:
 
         # Telemetry calculations
         gs = math.hypot(self.state.vx, self.state.vy)
-        
+
         if gs > 1e-6:
             cog = math.degrees(math.atan2(self.state.vx, self.state.vy)) % 360.0
         else:
             cog = self.state.heading
-            
+
         crab = (cog - self.state.heading + 180.0) % 360.0 - 180.0
 
         self.history.append(
@@ -482,9 +482,9 @@ class ParafoilSimulator:
                     wind_field=self.wind_field,
                 ):
                     pos = LocalPoint(self.state.x, self.state.y)
-                    
+
                     from guidance.shear_orbit_planner import solve_shear_terminal_plan
-                    
+
                     plan = solve_shear_terminal_plan(
                         position=pos,
                         target=self.target_position,
@@ -495,13 +495,13 @@ class ParafoilSimulator:
                         orbit_radius=self.loiter_radius,
                         breakout_altitude_margin=self.breakout_altitude_margin,
                     )
-                    
+
                     if plan is not None and plan.feasible:
                         self.terminal_orbit_plan = plan
                         self.state_machine.transition_to(
                             FlightState.TERMINAL_GUIDANCE
                         )
-                        
+
                         from guidance.glide_range import calculate_glide_range
                         self.terminal_entry_glide_range = calculate_glide_range(
                             altitude=self.state.altitude,
@@ -534,13 +534,13 @@ class ParafoilSimulator:
                     if self.loiter_guidance is not None:
                         self.loiter_guidance.center = self.terminal_orbit_plan.orbit_center
                         self.loiter_guidance.direction = self.terminal_orbit_plan.orbit_direction
-                        
+
                     expected_terminal_time = max(0.0, (self.terminal_entry_altitude - self.terminal_orbit_plan.breakout_altitude) / self.parafoil_config.descent_rate)
-                    
+
                     import math
                     orbit_circumference = 2.0 * math.pi * self.loiter_radius
                     safety_time_margin = orbit_circumference / self.parafoil_config.forward_speed
-                    
+
                     # Watchdog
                     if self.max_terminal_guidance_time < 30.0:
                         # Test override
@@ -634,12 +634,12 @@ class ParafoilSimulator:
         """
         Advance the simulation by one timestep.
         """
-        
+
         # Update current environment wind based on altitude and time
         current_wx, current_wy = self.wind_field.wind_at(self.state.altitude, getattr(self, "time", 0.0))
         self.parafoil_config.wind_x = current_wx
         self.parafoil_config.wind_y = current_wy
-        
+
         # Update shared wind estimator (once per sim step, representing flight software)
         self.wind_estimator.update(current_wx, current_wy)
 
