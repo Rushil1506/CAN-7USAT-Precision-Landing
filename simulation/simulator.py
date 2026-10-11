@@ -32,6 +32,7 @@ from flight.state_machine import (
 
 from environment.wind import WindField, ConstantWindField
 from guidance.wind_estimator import WindEstimator
+from control.actuator import ActuatorModel, ActuatorConfig
 
 
 @dataclass
@@ -71,9 +72,12 @@ class SimulationSample:
     loiter_radial_error: Optional[float] = None
     loiter_desired_heading: Optional[float] = None
 
-    # Dynamic breakout telemetry (populated when in TERMINAL_GUIDANCE)
+    # Loiter dynamic breakout telemetry (populated when in TERMINAL_GUIDANCE)
     breakout_required_altitude: Optional[float] = None
     breakout_altitude_threshold: Optional[float] = None
+
+    # Actuator telemetry
+    commanded_steering: Optional[float] = None
 
 
 class ParafoilSimulator:
@@ -122,6 +126,7 @@ class ParafoilSimulator:
         wind_y: float = 0.0,
         wind_field: Optional[WindField] = None,
         wind_estimator: Optional[WindEstimator] = None,
+        actuator_model: Optional[ActuatorModel] = None,
     ):
 
         # --------------------------------------------------
@@ -187,6 +192,10 @@ class ParafoilSimulator:
             drogue_config=drogue_config,
             parafoil_config=parafoil_config,
         )
+
+        self.actuator_model = actuator_model
+        if self.actuator_model is not None:
+            self.actuator_model.reset(0.0)
 
         # --------------------------------------------------
         # Simulation parameters
@@ -322,10 +331,13 @@ class ParafoilSimulator:
     # Record simulation state
     # ======================================================
 
-    def record_state(self, steering: float) -> None:
+    def record_state(self, steering: float, commanded_steering: Optional[float] = None) -> None:
         """
         Store the current state of the simulation.
         """
+        if commanded_steering is None:
+            commanded_steering = steering
+
         current_state = self.state_machine.get_state()
         loiter_phase = None
         loiter_r_dist = None
@@ -378,6 +390,7 @@ class ParafoilSimulator:
                 loiter_desired_heading=loiter_cmd_hdg,
                 breakout_required_altitude=breakout_req_alt,
                 breakout_altitude_threshold=breakout_thresh,
+                commanded_steering=commanded_steering,
             )
         )
 
@@ -632,6 +645,9 @@ class ParafoilSimulator:
 
         current_state = self.state_machine.get_state()
 
+        commanded_steering = steering
+        actual_steering = steering
+
         # --------------------------------------------------
         # DROGUE DESCENT
         # --------------------------------------------------
@@ -641,7 +657,10 @@ class ParafoilSimulator:
             # No precision steering during drogue descent.
             self.model.update_drogue(dt=self.dt)
 
-            steering = 0.0
+            commanded_steering = 0.0
+            actual_steering = 0.0
+            if self.actuator_model is not None:
+                self.actuator_model.reset(0.0)
 
         # --------------------------------------------------
         # PARAFOIL DEPLOYMENT
@@ -653,7 +672,10 @@ class ParafoilSimulator:
             # is deploying/inflating.
             self.model.update_parafoil(steering=0.0, dt=self.dt)
 
-            steering = 0.0
+            commanded_steering = 0.0
+            actual_steering = 0.0
+            if self.actuator_model is not None:
+                self.actuator_model.reset(0.0)
 
         # --------------------------------------------------
         # PRECISION GUIDANCE
@@ -661,7 +683,12 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.PRECISION_GUIDANCE:
 
-            self.model.update_parafoil(steering=steering, dt=self.dt)
+            if self.actuator_model is not None:
+                actual_steering = self.actuator_model.update(commanded_steering, self.dt)
+            else:
+                actual_steering = commanded_steering
+
+            self.model.update_parafoil(steering=actual_steering, dt=self.dt)
 
         # --------------------------------------------------
         # TERMINAL GUIDANCE
@@ -669,7 +696,12 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.TERMINAL_GUIDANCE:
 
-            self.model.update_parafoil(steering=steering, dt=self.dt)
+            if self.actuator_model is not None:
+                actual_steering = self.actuator_model.update(commanded_steering, self.dt)
+            else:
+                actual_steering = commanded_steering
+
+            self.model.update_parafoil(steering=actual_steering, dt=self.dt)
 
         # --------------------------------------------------
         # FINAL APPROACH
@@ -677,7 +709,12 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.FINAL_APPROACH:
 
-            self.model.update_parafoil(steering=steering, dt=self.dt)
+            if self.actuator_model is not None:
+                actual_steering = self.actuator_model.update(commanded_steering, self.dt)
+            else:
+                actual_steering = commanded_steering
+
+            self.model.update_parafoil(steering=actual_steering, dt=self.dt)
 
         # --------------------------------------------------
         # LANDING
@@ -685,7 +722,10 @@ class ParafoilSimulator:
 
         elif current_state == FlightState.LANDING:
 
-            steering = 0.0
+            commanded_steering = 0.0
+            actual_steering = 0.0
+            if self.actuator_model is not None:
+                self.actuator_model.reset(0.0)
 
         # --------------------------------------------------
         # FAILSAFE
@@ -694,7 +734,10 @@ class ParafoilSimulator:
         elif current_state == FlightState.FAILSAFE:
 
             # No precision steering in failsafe.
-            steering = 0.0
+            commanded_steering = 0.0
+            actual_steering = 0.0
+            if self.actuator_model is not None:
+                self.actuator_model.reset(0.0)
 
         # --------------------------------------------------
         # Advance simulation time
@@ -712,7 +755,7 @@ class ParafoilSimulator:
         # Record updated state
         # --------------------------------------------------
 
-        self.record_state(steering=steering)
+        self.record_state(steering=actual_steering, commanded_steering=commanded_steering)
 
     # ======================================================
     # Run complete simulation
