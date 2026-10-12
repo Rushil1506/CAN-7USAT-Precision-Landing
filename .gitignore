@@ -44,3 +44,24 @@ __pycache__/
 simulation_trajectory.png
 zero_wind_robustness.png
 zero_wind_robustness_results.csv
+# Local diagnostic experiments and generated artifacts
+/scratch/
+/trace_*.csv
+/debug_output*.txt
+/design_study_output.txt
+/pytest_output.txt
+/patch*.py
+/tmp*.py
+/tmp.txt
+/diagnostic*.py
+/forensic_analysis.py
+/check_cte*.py
+/check_end_cte.py
+/plot_*.png
+/*_trajectory.png
+/wind_validation_trajectories.png
+
+# Local secrets
+.env
+.env.*
+!.env.example

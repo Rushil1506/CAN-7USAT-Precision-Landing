@@ -33,9 +33,13 @@ from flight.state_machine import (
 from environment.wind import WindField, ConstantWindField
 from guidance.wind_estimator import WindEstimator
 from control.actuator import ActuatorModel, ActuatorConfig
+from guidance.loiter_center_planner import LoiterCenterPlanner, LoiterCenterPlannerConfig
+from sensors.sensor_model import SensorSuite, SensorNoiseConfig, SensorMeasurement
+from estimation.ekf import ExtendedKalmanFilter, EKFConfig, EKFStateEstimate
 
 
 @dataclass
+
 class SimulationSample:
     """
     One recorded point in the simulated flight.
@@ -78,6 +82,21 @@ class SimulationSample:
 
     # Actuator telemetry
     commanded_steering: Optional[float] = None
+
+    # Loiter planned center telemetry
+    loiter_planned_center_x: Optional[float] = None
+    loiter_planned_center_y: Optional[float] = None
+    loiter_center_offset_x: Optional[float] = None
+    loiter_center_offset_y: Optional[float] = None
+
+    # State estimation telemetry (Phase 5.1 EKF & sensor noise)
+    estimated_x: Optional[float] = None
+    estimated_y: Optional[float] = None
+    estimated_altitude: Optional[float] = None
+    estimated_heading: Optional[float] = None
+    sigma_x: Optional[float] = None
+    sigma_y: Optional[float] = None
+    sigma_heading: Optional[float] = None
 
 
 class ParafoilSimulator:
@@ -127,6 +146,10 @@ class ParafoilSimulator:
         wind_field: Optional[WindField] = None,
         wind_estimator: Optional[WindEstimator] = None,
         actuator_model: Optional[ActuatorModel] = None,
+        loiter_center_planner: Optional[LoiterCenterPlanner] = None,
+        sensor_suite: Optional[SensorSuite] = None,
+        ekf: Optional[ExtendedKalmanFilter] = None,
+        state_estimation_mode: str = "ideal",
     ):
 
         # --------------------------------------------------
@@ -171,6 +194,7 @@ class ParafoilSimulator:
         # --------------------------------------------------
 
         self.state = state
+        self.drogue_config = drogue_config
         self.parafoil_config = parafoil_config
 
         if wind_field is not None:
@@ -196,6 +220,62 @@ class ParafoilSimulator:
         self.actuator_model = actuator_model
         if self.actuator_model is not None:
             self.actuator_model.reset(0.0)
+
+        self.loiter_center_planner = loiter_center_planner
+        if self.loiter_center_planner is not None:
+            self.loiter_center_planner.reset()
+
+        # State estimation and sensor noise configuration (Phase 5.1)
+        valid_modes = {"ideal", "noisy_direct", "noisy_ekf"}
+        if state_estimation_mode not in valid_modes:
+            raise ValueError(
+                f"Invalid state_estimation_mode '{state_estimation_mode}'. "
+                f"Must be one of {valid_modes}"
+            )
+        self.state_estimation_mode = state_estimation_mode
+        self.sensor_suite = sensor_suite
+        self.ekf = ekf
+
+        if self.state_estimation_mode != "ideal" and self.sensor_suite is None:
+            self.sensor_suite = SensorSuite(SensorNoiseConfig(enabled=True))
+
+        if self.state_estimation_mode == "noisy_ekf" and self.ekf is None:
+            self.ekf = ExtendedKalmanFilter(
+                EKFConfig(
+                    enabled=True,
+                    forward_speed=self.parafoil_config.forward_speed,
+                    descent_rate=self.parafoil_config.descent_rate,
+                    max_turn_rate_deg_s=self.parafoil_config.max_turn_rate,
+                )
+            )
+
+        if self.sensor_suite is not None:
+            self.sensor_suite.reset()
+            self.last_sensor_meas = self.sensor_suite.update(
+                time=0.0,
+                true_x=self.state.x,
+                true_y=self.state.y,
+                true_altitude=self.state.altitude,
+                true_vx=self.state.vx,
+                true_vy=self.state.vy,
+                true_heading_deg=self.state.heading,
+            )
+        else:
+            self.last_sensor_meas = None
+
+        if self.ekf is not None:
+            self.ekf.reset(
+                init_x=self.state.x,
+                init_y=self.state.y,
+                init_alt=self.state.altitude,
+                init_heading_deg=self.state.heading,
+                init_time=0.0,
+                forward_speed=0.0,
+                descent_rate=self.drogue_config.descent_rate,
+            )
+            self.last_ekf_estimate = self.ekf.get_estimate()
+        else:
+            self.last_ekf_estimate = None
 
         # --------------------------------------------------
         # Simulation parameters
@@ -327,6 +407,51 @@ class ParafoilSimulator:
             return 0.0
         return max(0.0, self.time - self.final_approach_entry_time)
 
+    def get_navigation_state(self) -> Tuple[LocalPoint, float, float]:
+        """
+        Return (position, heading_deg, altitude) available to flight guidance.
+
+        Behavior depends strictly on self.state_estimation_mode:
+        - "ideal": Returns simulator ground truth (state.x, state.y, heading, altitude).
+        - "noisy_direct": Returns latest raw noisy sensor measurements.
+        - "noisy_ekf": Returns EKF state estimates.
+        """
+        if self.state_estimation_mode == "ideal":
+            return (
+                LocalPoint(self.state.x, self.state.y),
+                self.state.heading,
+                self.state.altitude,
+            )
+        elif self.state_estimation_mode == "noisy_direct":
+            if self.sensor_suite is not None:
+                return (
+                    LocalPoint(self.sensor_suite.latest_x, self.sensor_suite.latest_y),
+                    self.sensor_suite.latest_heading_deg,
+                    self.sensor_suite.latest_altitude,
+                )
+            return (
+                LocalPoint(self.state.x, self.state.y),
+                self.state.heading,
+                self.state.altitude,
+            )
+        elif self.state_estimation_mode == "noisy_ekf":
+            if self.last_ekf_estimate is not None:
+                return (
+                    LocalPoint(self.last_ekf_estimate.x, self.last_ekf_estimate.y),
+                    self.last_ekf_estimate.heading_deg,
+                    self.last_ekf_estimate.altitude,
+                )
+            return (
+                LocalPoint(self.state.x, self.state.y),
+                self.state.heading,
+                self.state.altitude,
+            )
+        return (
+            LocalPoint(self.state.x, self.state.y),
+            self.state.heading,
+            self.state.altitude,
+        )
+
     # ======================================================
     # Record simulation state
     # ======================================================
@@ -346,6 +471,11 @@ class ParafoilSimulator:
         breakout_req_alt = None
         breakout_thresh = None
 
+        loiter_center_x = None
+        loiter_center_y = None
+        loiter_offset_x = None
+        loiter_offset_y = None
+
         if current_state == FlightState.TERMINAL_GUIDANCE:
             if self.last_loiter_output is not None:
                 loiter_phase = self.last_loiter_output.phase
@@ -355,6 +485,12 @@ class ParafoilSimulator:
             if self.last_breakout_geometry is not None:
                 breakout_req_alt = self.last_breakout_geometry.minimum_required_altitude
                 breakout_thresh = self.last_breakout_geometry.breakout_altitude
+            if self.loiter_guidance is not None:
+                loiter_center_x = self.loiter_guidance.center.x
+                loiter_center_y = self.loiter_guidance.center.y
+                if self.target_position is not None:
+                    loiter_offset_x = loiter_center_x - self.target_position.x
+                    loiter_offset_y = loiter_center_y - self.target_position.y
 
         # Telemetry calculations
         gs = math.hypot(self.state.vx, self.state.vy)
@@ -391,6 +527,17 @@ class ParafoilSimulator:
                 breakout_required_altitude=breakout_req_alt,
                 breakout_altitude_threshold=breakout_thresh,
                 commanded_steering=commanded_steering,
+                loiter_planned_center_x=loiter_center_x,
+                loiter_planned_center_y=loiter_center_y,
+                loiter_center_offset_x=loiter_offset_x,
+                loiter_center_offset_y=loiter_offset_y,
+                estimated_x=self.last_ekf_estimate.x if self.last_ekf_estimate is not None else None,
+                estimated_y=self.last_ekf_estimate.y if self.last_ekf_estimate is not None else None,
+                estimated_altitude=self.last_ekf_estimate.altitude if self.last_ekf_estimate is not None else None,
+                estimated_heading=self.last_ekf_estimate.heading_deg if self.last_ekf_estimate is not None else None,
+                sigma_x=self.last_ekf_estimate.sigma_x if self.last_ekf_estimate is not None else None,
+                sigma_y=self.last_ekf_estimate.sigma_y if self.last_ekf_estimate is not None else None,
+                sigma_heading=self.last_ekf_estimate.sigma_heading_deg if self.last_ekf_estimate is not None else None,
             )
         )
 
@@ -403,7 +550,8 @@ class ParafoilSimulator:
         Check whether the CanSat should transition
         to another flight phase.
         """
-
+        prev_state = self.state_machine.get_state()
+        nav_pos, nav_heading, nav_alt = self.get_navigation_state()
         current_state = self.state_machine.get_state()
 
         # --------------------------------------------------
@@ -412,7 +560,7 @@ class ParafoilSimulator:
 
         if current_state == FlightState.DROGUE_DESCENT:
 
-            if self.state.altitude <= self.parafoil_deployment_altitude:
+            if nav_alt <= self.parafoil_deployment_altitude:
 
                 self.state_machine.transition_to(FlightState.PARAFOIL_DEPLOYMENT)
 
@@ -451,23 +599,23 @@ class ParafoilSimulator:
 
             if self.target_position is not None:
                 target_distance = distance(
-                    LocalPoint(self.state.x, self.state.y),
+                    nav_pos,
                     self.target_position,
                 )
 
                 if (
-                    self.state.altitude <= self.final_approach_altitude
+                    nav_alt <= self.final_approach_altitude
                     and target_distance <= self.final_approach_radius
                 ):
                     self.state_machine.transition_to(
                         FlightState.FINAL_APPROACH
                     )
                     self.final_approach_entry_time = self.time
-                    self.final_approach_entry_altitude = self.state.altitude
+                    self.final_approach_entry_altitude = nav_alt
                     self.final_approach_entry_distance = target_distance
 
                 elif should_enter_terminal_guidance(
-                    altitude=self.state.altitude,
+                    altitude=nav_alt,
                     horizontal_speed=self.parafoil_config.forward_speed,
                     descent_rate=self.parafoil_config.descent_rate,
                     target_distance=target_distance,
@@ -476,19 +624,19 @@ class ParafoilSimulator:
                     wind_x=self.parafoil_config.wind_x,
                     wind_y=self.parafoil_config.wind_y,
                     desired_course_deg=bearing(
-                        LocalPoint(self.state.x, self.state.y),
+                        nav_pos,
                         self.target_position
                     ),
                     wind_field=self.wind_field,
                 ):
-                    pos = LocalPoint(self.state.x, self.state.y)
+                    pos = nav_pos
 
                     from guidance.shear_orbit_planner import solve_shear_terminal_plan
 
                     plan = solve_shear_terminal_plan(
                         position=pos,
                         target=self.target_position,
-                        current_altitude=self.state.altitude,
+                        current_altitude=nav_alt,
                         wind_field=self.wind_field,
                         forward_speed=self.parafoil_config.forward_speed,
                         descent_rate=self.parafoil_config.descent_rate,
@@ -502,14 +650,30 @@ class ParafoilSimulator:
                             FlightState.TERMINAL_GUIDANCE
                         )
 
+                        if self.loiter_guidance is not None:
+                            self.loiter_guidance.center = self.terminal_orbit_plan.orbit_center
+                            self.loiter_guidance.direction = self.terminal_orbit_plan.orbit_direction
+
+                        if (
+                            self.loiter_center_planner is not None
+                            and self.loiter_center_planner.config.enabled
+                        ):
+                            planned_center, _ = self.loiter_center_planner.plan_center(
+                                target=self.target_position,
+                                wind_x=self.wind_estimator.wind_x,
+                                wind_y=self.wind_estimator.wind_y,
+                            )
+                            if self.loiter_guidance is not None:
+                                self.loiter_guidance.center = planned_center
+
                         from guidance.glide_range import calculate_glide_range
                         self.terminal_entry_glide_range = calculate_glide_range(
-                            altitude=self.state.altitude,
+                            altitude=nav_alt,
                             descent_rate=self.parafoil_config.descent_rate,
                             horizontal_speed=self.parafoil_config.forward_speed,
                             wind_field=self.wind_field,
                             desired_course_deg=bearing(
-                                LocalPoint(self.state.x, self.state.y),
+                                nav_pos,
                                 self.target_position
                             )
                         )
@@ -523,10 +687,10 @@ class ParafoilSimulator:
 
             if self.terminal_entry_time is None:
                 self.terminal_entry_time = self.time
-                self.terminal_entry_altitude = self.state.altitude
+                self.terminal_entry_altitude = nav_alt
                 if self.target_position is not None:
                     self.terminal_entry_distance = distance(
-                        LocalPoint(self.state.x, self.state.y),
+                        nav_pos,
                         self.target_position,
                     )
                 if self.target_position is not None and hasattr(self, 'terminal_orbit_plan'):
@@ -534,6 +698,18 @@ class ParafoilSimulator:
                     if self.loiter_guidance is not None:
                         self.loiter_guidance.center = self.terminal_orbit_plan.orbit_center
                         self.loiter_guidance.direction = self.terminal_orbit_plan.orbit_direction
+
+                    if (
+                        self.loiter_center_planner is not None
+                        and self.loiter_center_planner.config.enabled
+                    ):
+                        planned_center, _ = self.loiter_center_planner.plan_center(
+                            target=self.target_position,
+                            wind_x=self.wind_estimator.wind_x,
+                            wind_y=self.wind_estimator.wind_y,
+                        )
+                        if self.loiter_guidance is not None:
+                            self.loiter_guidance.center = planned_center
 
                     expected_terminal_time = max(0.0, (self.terminal_entry_altitude - self.terminal_orbit_plan.breakout_altitude) / self.parafoil_config.descent_rate)
 
@@ -551,7 +727,7 @@ class ParafoilSimulator:
 
             if self.target_position is not None:
                 target_distance = distance(
-                    LocalPoint(self.state.x, self.state.y),
+                    nav_pos,
                     self.target_position,
                 )
 
@@ -565,10 +741,10 @@ class ParafoilSimulator:
                     )
                 else:
                     # Calculate dynamic energy-aligned breakout geometry
-                    pos = LocalPoint(self.state.x, self.state.y)
+                    pos = nav_pos
                     geom = calculate_breakout_geometry(
                         position=pos,
-                        heading=self.state.heading,
+                        heading=nav_heading,
                         target=self.target_position,
                         forward_speed=self.parafoil_config.forward_speed,
                         descent_rate=self.parafoil_config.descent_rate,
@@ -583,7 +759,7 @@ class ParafoilSimulator:
                     # If current altitude is too low to safely execute the required breakout turn,
                     # do not initiate an aggressive maneuver; enter FAILSAFE.
                     min_turn_altitude = geom.turn_arc_length / geom.glide_ratio
-                    if self.state.altitude < min_turn_altitude and geom.turn_angle > 0.0:
+                    if nav_alt < min_turn_altitude and geom.turn_angle > 0.0:
                         self.state_machine.transition_to(
                             FlightState.FAILSAFE
                         )
@@ -591,17 +767,17 @@ class ParafoilSimulator:
                     # Dynamic energy-aligned breakout condition:
                     # Trigger transition to FINAL_APPROACH when current altitude has depleted
                     # to the calculated breakout altitude.
-                    elif self.state.altitude <= geom.breakout_altitude:
+                    elif nav_alt <= geom.breakout_altitude:
                         self.state_machine.transition_to(
                             FlightState.FINAL_APPROACH
                         )
                         self.final_approach_entry_time = self.time
-                        self.final_approach_entry_altitude = self.state.altitude
+                        self.final_approach_entry_altitude = nav_alt
                         self.final_approach_entry_distance = target_distance
                         self.breakout_time = self.time
-                        self.breakout_altitude = self.state.altitude
+                        self.breakout_altitude = nav_alt
                         self.breakout_distance = target_distance
-                        self.breakout_heading = self.state.heading
+                        self.breakout_heading = nav_heading
             else:
                 if (
                     self.terminal_entry_time is not None
@@ -626,6 +802,10 @@ class ParafoilSimulator:
             }:
                 self.state_machine.transition_to(FlightState.LANDING)
 
+        new_state = self.state_machine.get_state()
+        if new_state != prev_state and self.sensor_suite is not None and getattr(self.sensor_suite, "fault_config", None) is not None:
+            self.sensor_suite.fault_config.notify_state_transition(new_state, self.time)
+
     # ======================================================
     # One simulation step
     # ======================================================
@@ -640,8 +820,83 @@ class ParafoilSimulator:
         self.parafoil_config.wind_x = current_wx
         self.parafoil_config.wind_y = current_wy
 
-        # Update shared wind estimator (once per sim step, representing flight software)
-        self.wind_estimator.update(current_wx, current_wy)
+        # Determine current flight phase kinematics
+        current_state = self.state_machine.get_state()
+        if current_state == FlightState.DROGUE_DESCENT:
+            current_va = 0.0
+            current_vz = self.drogue_config.descent_rate
+            step_steering = 0.0
+        elif current_state == FlightState.PARAFOIL_DEPLOYMENT:
+            current_va = self.parafoil_config.forward_speed
+            current_vz = self.parafoil_config.descent_rate
+            step_steering = 0.0
+        else:
+            current_va = self.parafoil_config.forward_speed
+            current_vz = self.parafoil_config.descent_rate
+            step_steering = steering
+
+        # Update synthetic sensor suite from true physical state
+        if self.sensor_suite is not None:
+            self.last_sensor_meas = self.sensor_suite.update(
+                time=self.time,
+                true_x=self.state.x,
+                true_y=self.state.y,
+                true_altitude=self.state.altitude,
+                true_vx=self.state.vx,
+                true_vy=self.state.vy,
+                true_heading_deg=self.state.heading,
+            )
+
+        # Update shared wind estimator (representing flight software)
+        # Flight software calculates wind as measured GNSS ground velocity minus airspeed vector.
+        # Under drogue descent, airspeed is zero and horizontal ground velocity is pure wind drift.
+        if self.state_estimation_mode in {"noisy_ekf", "noisy_direct"} and self.sensor_suite is not None:
+            if current_state == FlightState.DROGUE_DESCENT:
+                meas_wx = self.sensor_suite.latest_vx
+                meas_wy = self.sensor_suite.latest_vy
+            else:
+                if self.state_estimation_mode == "noisy_ekf" and self.last_ekf_estimate is not None:
+                    psi_deg = self.last_ekf_estimate.heading_deg
+                else:
+                    psi_deg = self.sensor_suite.latest_heading_deg
+                psi_rad = math.radians(psi_deg)
+                air_vx = self.parafoil_config.forward_speed * math.sin(psi_rad)
+                air_vy = self.parafoil_config.forward_speed * math.cos(psi_rad)
+                meas_wx = self.sensor_suite.latest_vx - air_vx
+                meas_wy = self.sensor_suite.latest_vy - air_vy
+            self.wind_estimator.update(meas_wx, meas_wy)
+        else:
+            # Ideal baseline: pass true wind to wind_estimator
+            self.wind_estimator.update(current_wx, current_wy)
+
+        # Update EKF if enabled
+        if self.ekf is not None and self.last_sensor_meas is not None:
+            # Inject flight software wind estimate and flight phase kinematics into EKF
+            self.ekf.set_kinematics(current_va, current_vz)
+            self.ekf.set_wind_estimate(self.wind_estimator.wind_x, self.wind_estimator.wind_y)
+            # EKF prediction step using commanded/actual steering
+            self.ekf.predict(self.dt, step_steering)
+            # EKF measurement correction steps
+            if self.last_sensor_meas.gnss_valid:
+                self.ekf.correct_gps(
+                    meas_x=self.last_sensor_meas.gnss_x,
+                    meas_y=self.last_sensor_meas.gnss_y,
+                    meas_vx=self.last_sensor_meas.gnss_vx,
+                    meas_vy=self.last_sensor_meas.gnss_vy,
+                    meas_time=self.last_sensor_meas.gnss_timestamp if self.last_sensor_meas.gnss_timestamp is not None else self.last_sensor_meas.time,
+                )
+            if self.last_sensor_meas.baro_valid:
+                self.ekf.correct_baro(
+                    meas_alt=self.last_sensor_meas.baro_altitude,
+                    meas_time=self.last_sensor_meas.baro_timestamp if self.last_sensor_meas.baro_timestamp is not None else self.last_sensor_meas.time,
+                )
+            if self.last_sensor_meas.heading_valid:
+                self.ekf.correct_heading(
+                    meas_heading_deg=self.last_sensor_meas.heading_deg,
+                    meas_time=self.last_sensor_meas.heading_timestamp if self.last_sensor_meas.heading_timestamp is not None else self.last_sensor_meas.time,
+                )
+
+            self.last_ekf_estimate = self.ekf.get_estimate()
 
         current_state = self.state_machine.get_state()
 
@@ -822,9 +1077,10 @@ class ParafoilSimulator:
                 if self.loiter_guidance is not None:
                     # Provide the estimator's filtered wind to loiter guidance
                     self.loiter_guidance.set_wind(self.wind_estimator.wind_x, self.wind_estimator.wind_y)
+                    nav_pos, nav_heading, _ = self.get_navigation_state()
                     loiter_out = self.loiter_guidance.update(
-                        position=LocalPoint(self.state.x, self.state.y),
-                        current_heading=self.state.heading,
+                        position=nav_pos,
+                        current_heading=nav_heading,
                     )
                     self.last_loiter_output = loiter_out
                     self.loiter_history.append((self.time, loiter_out))
