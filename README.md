@@ -1,73 +1,101 @@
 ﻿# CAN-7USAT Precision Landing Algorithm
 
-Python simulation and algorithm-development project for autonomous parafoil
-guidance, navigation, control, and state estimation.
+Python simulation and algorithm-development project for autonomous parafoil guidance, navigation, control, and state estimation.
 
-> Experimental: simulation results do not establish hardware or flight
-> readiness. This Python project is not directly deployable as Teensy firmware.
+> **Experimental:** Simulation results do not establish hardware or flight readiness. This Python project is not directly deployable as Teensy firmware.
 
 ## Project structure
 
 - `control/`: PID and actuator models
-- `environment/`: wind models
-- `estimation/`: EKF and state estimation
-- `flight/`: parafoil dynamics and flight states
-- `guidance/`: guidance, loiter, and breakout algorithms
-- `navigation/`: coordinates, bearings, and waypoints
-- `sensors/`: synthetic sensors and fault injection
-- `simulation/`: simulation integration
-- `tests/`: regression and integration tests
-- `benchmarks/`: reproducible benchmark scripts
+- `environment/`: Wind models
+- `estimation/`: Extended Kalman Filter (EKF) and state estimation
+- `flight/`: Parafoil dynamics and flight states
+- `guidance/`: Guidance, loiter, and breakout algorithms
+- `navigation/`: Coordinates, bearings, and waypoints
+- `sensors/`: Synthetic sensors and fault injection
+- `simulation/`: Simulation integration
+- `tests/`: Regression and integration tests
+- `benchmarks/`: Benchmark scripts for scenario-specific validation
 
-## Setup on Windows
+## Getting started on Windows
 
-Python 3.13 is the current development environment.
+### 1. Clone the repository
 
-Install dependencies:
+The repository is private, so you need GitHub access to clone it.
 
-`py -3.13 -m venv .venv`
+```powershell
+git clone --branch phase-4-4-wind-biased-loiter https://github.com/Rushil1506/CAN-7USAT-Precision-Landing.git
+cd CAN-7USAT-Precision-Landing
+```
 
-`.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt`
+### 2. Set up Python
 
-Run tests:
+The development environment has been tested with Python 3.13.15 on Windows.
 
-`.\.venv\Scripts\python.exe -m pytest`
+Create a virtual environment:
 
-Run the primary simulation:
+```powershell
+py -3.13 -m venv .venv
+```
 
-`.\.venv\Scripts\python.exe run_simulation.py`
+Install the project and development dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+### 3. Run the tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+### 4. Run the primary simulation
+
+```powershell
+.\.venv\Scripts\python.exe run_simulation.py
+```
 
 ## Reference configuration
 
-- PID gains: Kp = 10.0, Ki = 0.1, Kd = 0.5
-- Heading PID input in radians
-- Integral bounds: [-10, +10]
-- Normalized steering output: [-1, +1]
-- Nominal airspeed: 8 m/s
-- Nominal descent rate: 2.5 m/s
-- Maximum modeled turn rate: 30 degrees/second
-- Terminal loiter radius: 30 m
-- Local target: (1200, 0) m
-- Default simulation mode: ideal
+The following values describe the simulation configuration, not certified flight parameters.
 
-These are simulation settings, not certified flight parameters.
-Refer to `FINAL_PROJECT_STATUS.md` and the engineering reports for
-assumptions, validation results, and limitations.
+| Parameter | Value |
+|---|---|
+| PID proportional gain (Kp) | 10.0 |
+| PID integral gain (Ki) | 0.1 |
+| PID derivative gain (Kd) | 0.5 |
+| Heading PID input | Radians |
+| Integral limits | [-10, +10] |
+| Normalized steering output | [-1, +1] |
+| Nominal airspeed | 8 m/s |
+| Nominal descent rate | 2.5 m/s |
+| Maximum modeled turn rate | 30 degrees/second |
+| Terminal loiter radius | 30 m |
+| Local target | (1200, 0) m |
+| Default simulation mode | Ideal |
 
-## Engineering reports
+### Coordinate conventions
 
-Start with `FINAL_PROJECT_STATUS.md`. The Phase 4 and Phase 5 reports
-document guidance, actuator dynamics, loiter planning, state estimation,
-and sensor-fault robustness.
+- +X points East.
+- +Y points North.
+- Heading 0° points North.
+- Heading 90° points East.
+- Heading 180° points South.
+- Heading 270° points West.
 
-Benchmark results should always be interpreted with their scenario settings,
-random seeds, estimator modes, and actuator configuration.
+## Engineering reports and benchmarks
+
+Start with `FINAL_PROJECT_STATUS.md`.
+
+The Phase 4 and Phase 5 reports document guidance, actuator dynamics, loiter planning, state estimation, sensor faults, and validation results.
+
+Benchmark results must be interpreted alongside their scenario settings, random seeds, estimator modes, and actuator configuration. Results from one scenario should not be treated as proof of general robustness.
 
 ## Teensy firmware
 
-This repository is the Python simulation and algorithm reference.
-A Teensy implementation requires a separate C++ port, real sensor interfaces,
-calibrated servo outputs, and hardware-in-the-loop testing.
+This repository is the Python simulation and algorithm reference. A Teensy implementation requires a separate C++ port, real sensor interfaces, calibrated servo outputs, and hardware-in-the-loop testing.
 
-Basic ES3004 servo movement does not validate the complete flight-control
-system or the parafoil's mechanical linkages.
+Basic EMAX ES3004 servo movement does not validate the complete flight-control system, servo linkage geometry, or parafoil flight performance.
+
+Simulation validation is not a substitute for hardware validation or controlled flight testing.
