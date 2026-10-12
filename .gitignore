@@ -65,3 +65,7 @@ zero_wind_robustness_results.csv
 .env
 .env.*
 !.env.example
+
+# Generated host-compiled firmware test binaries
+/firmware/tests/test_core.exe
+/firmware/tests/parity_runner.exe
